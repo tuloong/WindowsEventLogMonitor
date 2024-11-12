@@ -37,24 +37,17 @@ internal class EventLogReader
         return eventLog.Entries;
     }
 
-    /// <summary>
-    /// 筛选 MSSQLSERVER 的事件
-    /// </summary>
-    /// <param name="source"></param>
-    /// <param name="eventType"></param>
-    /// <returns></returns>
-    public List<EventLogEntry> GetFilteredEntries(string source, string eventType)
+    public List<EventLogEntry> FilterEventLogEntries(string source, string eventType)
     {
-        HashSet<EventLogEntry> filteredEntries = new HashSet<EventLogEntry>();
+        if (string.IsNullOrEmpty(source))
+            throw new ArgumentException("Source cannot be null or empty.", nameof(source));
 
-        foreach (EventLogEntry entry in eventLog.Entries)
-        {
-            if (entry.Source == source && (string.IsNullOrEmpty(eventType) || entry.EntryType.ToString() == eventType))
-            {
-                filteredEntries.Add(entry);
-            }
-        }
+        // Filtering using LINQ and directly converting to a List.
+        List<EventLogEntry> filteredEntries = eventLog.Entries.Cast<EventLogEntry>()
+            .Where(entry => entry.Source == source && (string.IsNullOrEmpty(eventType) || entry.EntryType.ToString() == eventType))
+            .ToList();
 
-        return filteredEntries.ToList();
+        return filteredEntries;
     }
+
 }

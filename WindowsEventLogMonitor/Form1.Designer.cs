@@ -23,7 +23,7 @@
         #region Windows Form Designer generated code
 
         private ComboBox comboBoxEventSource;
-        private Button btStartLogs;
+        private Button btnStartLogs;
         private DataGridView dataGridViewLogs;
         private TextBox textBoxApiUrl;
         private Button btnSaveConfig;
@@ -47,9 +47,9 @@
 
             // Initialize ContextMenuStrip
             contextMenuStrip = new ContextMenuStrip();
-            var startMenuItem = new ToolStripMenuItem("Start Logs", null, (s, e) => StartLogOutput());
+            var startMenuItem = new ToolStripMenuItem("Start Logs", null, async (s, e) => await Task.Run(() => StartLogOutput()));
             var stopMenuItem = new ToolStripMenuItem("Stop Logs", null, (s, e) => StopLogOutput());
-            var exitMenuItem = new ToolStripMenuItem("Exit", null, (s, e) => Application.Exit());
+            var exitMenuItem = new ToolStripMenuItem("Exit", null, (s, e) => ExitMenuItem_Click(s, e));
 
             contextMenuStrip.Items.Add(startMenuItem);
             contextMenuStrip.Items.Add(stopMenuItem);
@@ -79,11 +79,11 @@
             tableLayoutPanel.Controls.Add(comboBoxEventSource, 0, 0);
 
             // Button to Load Logs
-            btStartLogs = new Button();
-            btStartLogs.Text = "Start Logs";
-            btStartLogs.Dock = DockStyle.Fill;
-            btStartLogs.Click += BtnStartLogs_Click;
-            tableLayoutPanel.Controls.Add(btStartLogs, 1, 0);
+            btnStartLogs = new Button();
+            btnStartLogs.Text = "Start Logs";
+            btnStartLogs.Dock = DockStyle.Fill;
+            btnStartLogs.Click += BtnStartLogs_Click;
+            tableLayoutPanel.Controls.Add(btnStartLogs, 1, 0);
 
             // DataGridView to Display Logs
             dataGridViewLogs = new DataGridView();

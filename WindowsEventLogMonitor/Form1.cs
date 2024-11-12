@@ -39,7 +39,20 @@ namespace WindowsEventLogMonitor
 
         private async Task StartLogOutput()
         {
-            var selectedSource = comboBoxEventSource.SelectedItem?.ToString();
+            var selectedSource = "";
+            if (comboBoxEventSource.InvokeRequired)
+            {
+                comboBoxEventSource.Invoke(new Action(() =>
+                {
+                    selectedSource = comboBoxEventSource.SelectedItem?.ToString();
+                    // 在这里处理 selectedSource
+                }));
+            }
+            else
+            {
+                selectedSource = comboBoxEventSource.SelectedItem?.ToString();
+                // 在这里处理 selectedSource
+            }
             if (string.IsNullOrEmpty(selectedSource))
             {
                 MessageBox.Show("Please select a source first.");
@@ -47,47 +60,81 @@ namespace WindowsEventLogMonitor
             }
 
             isMonitoring = true;
+            btnStartLogs.Invoke(new MethodInvoker(() =>
+            {
+                btnStartLogs.Text = "Cancel Logs";
+                btnStartLogs.BackColor = System.Drawing.Color.Red;
+            }
+            ));
 
             while (isMonitoring)
             {
-                var logEntries = eventLogReader.GetFilteredEntries(selectedSource, string.Empty); // get logs，filter by source，no filter by event type
-                var pushedLogIds = LoadPushedLogIds();
-
-                var newLogs = logEntries.Where(log => !pushedLogIds.Contains(GenerateUniqueKey(log))).ToList();
-                if (newLogs.Count > 0)
+                try
                 {
-                    foreach (var logEntry in newLogs)
+                    var logEntries = eventLogReader.FilterEventLogEntries(selectedSource, string.Empty);
+                    var pushedLogIds = LoadPushedLogIds();
+
+                    var newLogs = logEntries
+                        .Where(log => !pushedLogIds.Contains(GenerateUniqueKey(log)))
+                        .ToList();
+
+                    if (newLogs.Count > 0)
                     {
-                        if (!isMonitoring) break; // 如果监控停止，跳出循环
-
-                        // 限制展示的条目不超过100行
-                        if (dataGridViewLogs.Rows.Count >= 100)
-                        {
-                            dataGridViewLogs.Rows.RemoveAt(0); // 移除最早的一行
-                        }
-
-                        dataGridViewLogs.Rows.Add(logEntry.TimeGenerated, logEntry.Message, logEntry.InstanceId, logEntry.EntryType, logEntry.Site, logEntry.Source);
-                        if (dataGridViewLogs.RowCount > 0)
-                        {
-                            dataGridViewLogs.FirstDisplayedScrollingRowIndex = dataGridViewLogs.RowCount - 1; // 滚动到最后一行
-                        }
-
-                        await PushSingleLogAsync(logEntry);
-                        await Task.Delay(1000); // 每1秒输出一行日志
+                        await HandleNewLogs(newLogs);
                     }
-
-                    //await PushLogsAsync(newLogs);
+                    else
+                    {
+                        await Task.Delay(1000); // 如果没有新日志，每1秒检查一次
+                    }
                 }
-                else
+                catch (Exception ex)
                 {
-                    await Task.Delay(1000); // 如果没有新日志，每1秒检查一次
+                    MessageBox.Show($"An error occurred: {ex.Message}");
                 }
             }
         }
 
+        private async Task HandleNewLogs(List<EventLogEntry> newLogs)
+        {
+            foreach (var logEntry in newLogs)
+            {
+                if (!isMonitoring) break;
+
+                AddLogToDataGridView(logEntry);
+                await PushSingleLogAsync(logEntry);
+
+                await Task.Delay(1000); // 每1秒输出一行日志
+            }
+        }
+
+        private void AddLogToDataGridView(EventLogEntry logEntry)
+        {
+            dataGridViewLogs.Invoke(new MethodInvoker(() =>
+            {
+                if (dataGridViewLogs.Rows.Count >= 100)
+                {
+                    dataGridViewLogs.Rows.RemoveAt(0); // 移除最早的一行
+                }
+
+                dataGridViewLogs.Rows.Add(logEntry.TimeGenerated, logEntry.Message, logEntry.InstanceId, logEntry.EntryType, logEntry.Site, logEntry.Source);
+                if (dataGridViewLogs.RowCount > 0)
+                {
+                    dataGridViewLogs.FirstDisplayedScrollingRowIndex = dataGridViewLogs.RowCount - 1;
+                }
+            }
+            ));
+        }
+
+
         private void StopLogOutput()
         {
             isMonitoring = false;
+            btnStartLogs.Invoke(new MethodInvoker(() =>
+            {
+                btnStartLogs.Text = "Start Logs";
+                btnStartLogs.BackColor = System.Drawing.Color.Empty;
+            }
+            ));
         }
 
         private async Task PushLogsAsync(List<EventLogEntry> newLogs)
@@ -108,7 +155,7 @@ namespace WindowsEventLogMonitor
 
             var json = JsonConvert.SerializeObject(logs);
             var apiUrl = textBoxApiUrl.Text;
-            await httpService.PushLogsToAPI(json, apiUrl);
+            await httpService.PushLogsToAPIAsync(json, apiUrl);
             // 记录推送的日志ID
             var logTime = DateTime.Now;
             using (var writer = new StreamWriter(LogFilePath, true))
@@ -136,7 +183,7 @@ namespace WindowsEventLogMonitor
             var logs = new List<object> { log };
             var json = JsonConvert.SerializeObject(logs);
             var apiUrl = textBoxApiUrl.Text;
-            await httpService.PushLogsToAPI(json, apiUrl);
+            await httpService.PushLogsToAPIAsync(json, apiUrl);
 
             // 记录推送的日志ID
             var logTime = DateTime.Now;
@@ -153,27 +200,26 @@ namespace WindowsEventLogMonitor
             Config.SaveConfig(config);
         }
 
-        private void BtnStartLogs_Click(object sender, EventArgs e)
+        private async void BtnStartLogs_Click(object sender, EventArgs e)
         {
-            if (btStartLogs.Text == "Start Logs")
+            if (btnStartLogs.Text == "Start Logs")
             {
-                StartLogOutput();
-                btStartLogs.Text = "Cancel Logs"; // 修改按钮文本
-                btStartLogs.BackColor = System.Drawing.Color.Red; // 修改按钮背景颜色
+                await Task.Run(() => StartLogOutput());  // 启动 StartLogOutput() 在单独的线程上运行
             }
             else
             {
                 isMonitoring = false;
-                btStartLogs.Text = "Start Logs"; // 恢复按钮文本
-                btStartLogs.BackColor = System.Drawing.Color.Empty; // 恢复按钮背景颜色
+                btnStartLogs.Text = "Start Logs";
+                btnStartLogs.BackColor = System.Drawing.Color.Empty;
             }
         }
+
 
         private void BtnLoadLogs_Click(object sender, EventArgs e)
         {
             var selectedSource = comboBoxEventSource.SelectedItem?.ToString();
             eventLogReader = new EventLogReader("Application");
-            var logs = eventLogReader.GetFilteredEntries(selectedSource!, string.Empty);
+            var logs = eventLogReader.FilterEventLogEntries(selectedSource!, string.Empty);
             dataGridViewLogs.DataSource = logs.Select(log => new
             {
                 log.InstanceId,
@@ -196,7 +242,7 @@ namespace WindowsEventLogMonitor
                 return;
             }
 
-            var logs = eventLogReader.GetFilteredEntries(selectedSource, string.Empty); // get logs，filter by source，no filter by event type
+            var logs = eventLogReader.FilterEventLogEntries(selectedSource, string.Empty); // get logs，filter by source，no filter by event type
             var pushedLogIds = LoadPushedLogIds();
 
             var newLogs = logs.Where(log => !pushedLogIds.Contains(GenerateUniqueKey(log))).ToList();
@@ -207,7 +253,7 @@ namespace WindowsEventLogMonitor
             }
 
             var jsonData = jsonService.ConvertToJSON(newLogs);
-            await httpService.PushLogsToAPI(jsonData, Config.GetCachedConfig()?.ApiUrl ?? "");
+            await httpService.PushLogsToAPIAsync(jsonData, Config.GetCachedConfig()?.ApiUrl ?? "");
 
             // 记录推送时间点和事件主键，并缓存到本地日志
             var logTime = DateTime.Now;
@@ -244,7 +290,7 @@ namespace WindowsEventLogMonitor
         }
 
         private string GenerateUniqueKey(EventLogEntry log)
-        { 
+        {
             var timeGeneratedTimestamp = new DateTimeOffset(log.TimeGenerated).ToUnixTimeSeconds();
             return $"{log.InstanceId}_{timeGeneratedTimestamp}_{log.TimeGenerated.Ticks}_{log.Source}";
         }
@@ -262,7 +308,18 @@ namespace WindowsEventLogMonitor
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             base.OnFormClosing(e);
-            notifyIcon.Dispose();
+            if (e.CloseReason == CloseReason.UserClosing)
+            {
+                e.Cancel = true;  // 取消退出动作
+                Hide();  // 隐藏主窗口
+                notifyIcon.Visible = true;  // 显示系统托盘图标
+            }
+        }
+
+        private void ExitMenuItem_Click(object sender, EventArgs e)
+        {
+            isMonitoring = false;  // 确保停止任务
+            Application.Exit();  // 关闭应用程序
         }
     }
 }

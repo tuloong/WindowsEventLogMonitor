@@ -10,13 +10,14 @@ namespace WindowsEventLogMonitor;
 
 internal class HttpService
 {
+
+    private static readonly HttpClient client = new HttpClient();
+
     public async Task PushLogsToAPI(string jsonData, string apiUrl)
     {
-        using (HttpClient client = new HttpClient())
-        {
-            var content = new StringContent(jsonData, Encoding.UTF8, "application/json");
-            var response = await client.PostAsync(apiUrl, content);
-            response.EnsureSuccessStatusCode();
-        }
+        var content = new StringContent(jsonData, Encoding.UTF8, "application/json");
+        var response = await client.PostAsync(apiUrl, content);
+        response.EnsureSuccessStatusCode();
     }
+   
 }

@@ -23,11 +23,11 @@
         #region Windows Form Designer generated code
 
         private ComboBox comboBoxEventSource;
-        private Button btnLoadLogs;
+        private Button btStartLogs;
         private DataGridView dataGridViewLogs;
-        private Button btnPushLogs;
         private TextBox textBoxApiUrl;
         private Button btnSaveConfig;
+        private TableLayoutPanel tableLayoutPanel;
 
         /// <summary>
         ///  Required method for Designer support - do not modify
@@ -35,52 +35,67 @@
         /// </summary>
         private void InitializeComponent()
         {
+            this.SuspendLayout();
+
+            // TableLayoutPanel for layout management
+            tableLayoutPanel = new TableLayoutPanel();
+            tableLayoutPanel.ColumnCount = 3;
+            tableLayoutPanel.RowCount = 3;
+            tableLayoutPanel.Dock = DockStyle.Fill;
+            tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30F));
+            tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40F));
+            tableLayoutPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30F));
+            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 40F));
+            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            tableLayoutPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 40F));
+            this.Controls.Add(tableLayoutPanel);
+
             // ComboBox for Event Source
             comboBoxEventSource = new ComboBox();
             comboBoxEventSource.Items.AddRange(new string[] { "MSSQLSERVER", "PerfProc", "ESENT" });
-            comboBoxEventSource.Location = new Point(20, 20);
-            comboBoxEventSource.Width = 200;
-            this.Controls.Add(comboBoxEventSource);
+            comboBoxEventSource.Dock = DockStyle.Fill;
+            tableLayoutPanel.Controls.Add(comboBoxEventSource, 0, 0);
 
             // Button to Load Logs
-            btnLoadLogs = new Button();
-            btnLoadLogs.Text = "Load Logs";
-            btnLoadLogs.Location = new Point(240, 20);
-            btnLoadLogs.Click += BtnLoadLogs_Click;
-            this.Controls.Add(btnLoadLogs);
+            btStartLogs = new Button();
+            btStartLogs.Text = "Start Logs";
+            btStartLogs.Dock = DockStyle.Fill;
+            btStartLogs.Click += BtnStartLogs_Click;
+            tableLayoutPanel.Controls.Add(btStartLogs, 1, 0);
 
             // DataGridView to Display Logs
             dataGridViewLogs = new DataGridView();
-            dataGridViewLogs.Location = new Point(20, 60);
-            dataGridViewLogs.Width = 600;
-            dataGridViewLogs.Height = 300;
-            this.Controls.Add(dataGridViewLogs);
-
-            // Button to Push Logs
-            btnPushLogs = new Button();
-            btnPushLogs.Text = "Push Logs";
-            btnPushLogs.Location = new Point(20, 380);
-            btnPushLogs.Click += BtnPushLogs_Click;
-            this.Controls.Add(btnPushLogs);
+            dataGridViewLogs.Dock = DockStyle.Fill;
+            dataGridViewLogs.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            dataGridViewLogs.AllowUserToAddRows = false;
+            dataGridViewLogs.AllowUserToDeleteRows = false;
+            dataGridViewLogs.ReadOnly = true;
+            dataGridViewLogs.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+            tableLayoutPanel.Controls.Add(dataGridViewLogs, 0, 1);
+            tableLayoutPanel.SetColumnSpan(dataGridViewLogs, 3);
 
             // TextBox for API URL
             textBoxApiUrl = new TextBox();
-            textBoxApiUrl.Location = new Point(20, 420);
-            textBoxApiUrl.Width = 400;
-            this.Controls.Add(textBoxApiUrl);
+            textBoxApiUrl.Dock = DockStyle.Fill;
+            tableLayoutPanel.Controls.Add(textBoxApiUrl, 0, 2);
+            tableLayoutPanel.SetColumnSpan(textBoxApiUrl, 2);
+            textBoxApiUrl.Text = Config.LoadConfig()?.ApiUrl;
 
             // Button to Save Config
             btnSaveConfig = new Button();
             btnSaveConfig.Text = "Save Config";
-            btnSaveConfig.Location = new Point(440, 420);
+            btnSaveConfig.Dock = DockStyle.Fill;
             btnSaveConfig.Click += BtnSaveConfig_Click;
-            this.Controls.Add(btnSaveConfig);
+            tableLayoutPanel.Controls.Add(btnSaveConfig, 2, 2);
 
+            // Form settings
             this.components = new System.ComponentModel.Container();
-            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
+            this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Dpi;
             this.ClientSize = new System.Drawing.Size(800, 450);
             this.Text = "Form1";
+            this.ResumeLayout(false);
         }
+
 
         #endregion
     }

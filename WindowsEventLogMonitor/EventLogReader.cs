@@ -9,7 +9,7 @@ namespace WindowsEventLogMonitor;
 
 internal class EventLogReader
 {
-    private EventLog eventLog;
+    private readonly EventLog eventLog;
 
     public EventLogReader(string logName)
     {

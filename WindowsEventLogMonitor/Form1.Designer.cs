@@ -28,6 +28,8 @@
         private TextBox textBoxApiUrl;
         private Button btnSaveConfig;
         private TableLayoutPanel tableLayoutPanel;
+        private NotifyIcon notifyIcon;
+        private ContextMenuStrip contextMenuStrip;
 
         /// <summary>
         ///  Required method for Designer support - do not modify
@@ -36,6 +38,26 @@
         private void InitializeComponent()
         {
             this.SuspendLayout();
+
+            // Initialize NotifyIcon
+            notifyIcon = new NotifyIcon();
+            notifyIcon.Icon = SystemIcons.Application;
+            notifyIcon.Text = "Windows Event Log Monitor";
+            notifyIcon.Visible = true;
+
+            // Initialize ContextMenuStrip
+            contextMenuStrip = new ContextMenuStrip();
+            var startMenuItem = new ToolStripMenuItem("Start Logs", null, (s, e) => StartLogOutput());
+            var stopMenuItem = new ToolStripMenuItem("Stop Logs", null, (s, e) => StopLogOutput());
+            var exitMenuItem = new ToolStripMenuItem("Exit", null, (s, e) => Application.Exit());
+
+            contextMenuStrip.Items.Add(startMenuItem);
+            contextMenuStrip.Items.Add(stopMenuItem);
+            contextMenuStrip.Items.Add(new ToolStripSeparator());
+            contextMenuStrip.Items.Add(exitMenuItem);
+
+            notifyIcon.ContextMenuStrip = contextMenuStrip;
+            notifyIcon.DoubleClick += (s, e) => this.Show();
 
             // TableLayoutPanel for layout management
             tableLayoutPanel = new TableLayoutPanel();

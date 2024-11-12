@@ -85,6 +85,10 @@ namespace WindowsEventLogMonitor
             }
         }
 
+        private void StopLogOutput()
+        {
+            isMonitoring = false;
+        }
 
         private async Task PushLogsAsync(List<EventLogEntry> newLogs)
         {
@@ -243,6 +247,22 @@ namespace WindowsEventLogMonitor
         { 
             var timeGeneratedTimestamp = new DateTimeOffset(log.TimeGenerated).ToUnixTimeSeconds();
             return $"{log.InstanceId}_{timeGeneratedTimestamp}_{log.TimeGenerated.Ticks}_{log.Source}";
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            if (this.WindowState == FormWindowState.Minimized)
+            {
+                this.Hide();
+                notifyIcon.Visible = true;
+            }
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            base.OnFormClosing(e);
+            notifyIcon.Dispose();
         }
     }
 }

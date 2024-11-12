@@ -12,7 +12,7 @@ namespace WindowsEventLogMonitor
             // see https://aka.ms/applicationconfiguration.
             ApplicationConfiguration.Initialize();
             Config.LoadConfig();
-            Application.Run(new Form1());
+            Application.Run(new MainForm());
         }
     }
 }

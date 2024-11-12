@@ -11,7 +11,7 @@ using Microsoft.VisualBasic.Logging;
 
 namespace WindowsEventLogMonitor
 {
-    public partial class Form1 : Form
+    public partial class MainForm : Form
     {
 
         private EventLogReader eventLogReader;
@@ -20,7 +20,7 @@ namespace WindowsEventLogMonitor
         private const string LogFilePath = "push_log.ini";
         private bool isMonitoring = false;
 
-        public Form1()
+        public MainForm()
         {
             InitializeComponent();
             eventLogReader = new EventLogReader("Application");

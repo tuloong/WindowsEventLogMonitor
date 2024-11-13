@@ -8,6 +8,7 @@ using Newtonsoft.Json;
 using System.Text;
 using System.Threading.Tasks;
 using Microsoft.VisualBasic.Logging;
+using System.Text.RegularExpressions;
 
 namespace WindowsEventLogMonitor
 {
@@ -19,6 +20,8 @@ namespace WindowsEventLogMonitor
         private HttpService httpService;
         private const string LogFilePath = "push_log.ini";
         private bool isMonitoring = false;
+        private System.Threading.Timer logCleanTimer;
+
 
         public MainForm()
         {
@@ -35,10 +38,17 @@ namespace WindowsEventLogMonitor
             dataGridViewLogs.Columns.Add("Site", "Site");
             dataGridViewLogs.Columns.Add("TimeGenerated", "TimeGenerated");
             dataGridViewLogs.Columns.Add("Source", "Source");
+
+            // 设置定时器，每天清理一次日志文件
+            logCleanTimer = new System.Threading.Timer(_ => CleanLogFile(), null, TimeSpan.Zero, TimeSpan.FromDays(1));
         }
 
         private async Task StartLogOutput()
         {
+
+            // 清理日志文件
+            CleanLogFile();
+
             var selectedSource = "";
             if (comboBoxEventSource.InvokeRequired)
             {
@@ -74,8 +84,10 @@ namespace WindowsEventLogMonitor
                     var logEntries = eventLogReader.FilterEventLogEntries(selectedSource, string.Empty);
                     var pushedLogIds = LoadPushedLogIds();
 
+                    // 获取最新日志，
+                    var generatedTime = GetMaxGeneratedTime();
                     var newLogs = logEntries
-                        .Where(log => !pushedLogIds.Contains(GenerateUniqueKey(log)))
+                        .Where(log => !pushedLogIds.Contains(GenerateUniqueKey(log)) && log.TimeGenerated > generatedTime)
                         .ToList();
 
                     if (newLogs.Count > 0)
@@ -187,7 +199,7 @@ namespace WindowsEventLogMonitor
 
             // 记录推送的日志ID
             var logTime = DateTime.Now;
-            var logEntryStrings = $"Log ID: {GenerateUniqueKey(logEntry)}, Pushed at: {logTime}";
+            var logEntryStrings = $"Log ID: {GenerateUniqueKey(logEntry)},Generated at: {logEntry.TimeGenerated},Pushed at: {logTime}";
             using (var writer = new StreamWriter(LogFilePath, true))
             {
                 await writer.WriteLineAsync(logEntryStrings);
@@ -267,6 +279,33 @@ namespace WindowsEventLogMonitor
             }
         }
 
+        private DateTime GetMaxGeneratedTime()
+        {
+            DateTime maxGeneratedTime = DateTime.MinValue;
+            string pattern = @"Generated at: (?<generatedTime>[\d\- :]+)";
+
+            if (File.Exists(LogFilePath))
+            {
+                var lines = File.ReadAllLines(LogFilePath);
+                foreach (var line in lines)
+                {
+                    var match = Regex.Match(line, pattern);
+                    if (match.Success)
+                    {
+                        if (DateTime.TryParse(match.Groups["generatedTime"].Value, out var generatedDate))
+                        {
+                            if (generatedDate > maxGeneratedTime)
+                            {
+                                maxGeneratedTime = generatedDate;
+                            }
+                        }
+                    }
+                }
+            }
+
+            return maxGeneratedTime;
+        }
+
         private HashSet<string> LoadPushedLogIds()
         {
             var pushedLogIds = new HashSet<string>();
@@ -319,7 +358,46 @@ namespace WindowsEventLogMonitor
         private void ExitMenuItem_Click(object sender, EventArgs e)
         {
             isMonitoring = false;  // 确保停止任务
+            logCleanTimer?.Dispose(); // 释放定时器
             Application.Exit();  // 关闭应用程序
         }
+
+        private void CleanLogFile()
+        {
+            var retentionPeriod = TimeSpan.FromDays(7); // 保留7天的日志
+            var validLines = new List<string>();
+            string pattern = @"Generated at: (?<generatedTime>[\d\- :]+)";
+
+            if (File.Exists(LogFilePath))
+            {
+                var lines = File.ReadAllLines(LogFilePath);
+                var logEntries = new List<(DateTime generatedTime, string line)>();
+
+                foreach (var line in lines)
+                {
+                    var match = Regex.Match(line, pattern);
+                    if (match.Success)
+                    {
+                        if (DateTime.TryParse(match.Groups["generatedTime"].Value, out var generatedDate))
+                        {
+                            logEntries.Add((generatedDate, line));
+                        }
+                    }
+                }
+
+                if (logEntries.Any())
+                {
+                    // 按生成时间排序
+                    logEntries = logEntries.OrderByDescending(entry => entry.generatedTime).ToList();
+
+                    // 取最近七天的日志
+                    var cutoffDate = logEntries.First().generatedTime - retentionPeriod;
+                    validLines = logEntries.Where(entry => entry.generatedTime >= cutoffDate).Select(entry => entry.line).ToList();
+
+                    File.WriteAllLines(LogFilePath, validLines);
+                }
+            }
+        }
+
     }
 }

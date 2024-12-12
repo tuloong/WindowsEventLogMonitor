@@ -41,7 +41,8 @@
 
             // Initialize NotifyIcon
             notifyIcon = new NotifyIcon();
-            notifyIcon.Icon = SystemIcons.Application;
+            // notifyIcon.Icon = SystemIcons.Application;
+            notifyIcon.Icon = new Icon("Resources\\app.ico");
             notifyIcon.Text = "Windows Event Log Monitor";
             notifyIcon.Visible = true;
 
@@ -115,6 +116,7 @@
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Dpi;
             this.ClientSize = new System.Drawing.Size(800, 450);
             this.Text = "WindowsEventLogMonitor";
+            this.Icon = new Icon("Resources\\app.ico");
             this.ResumeLayout(false);
         }
 

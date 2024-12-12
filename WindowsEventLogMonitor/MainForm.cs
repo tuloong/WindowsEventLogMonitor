@@ -364,37 +364,42 @@ namespace WindowsEventLogMonitor
 
         private void CleanLogFile()
         {
-            var retentionPeriod = TimeSpan.FromDays(7); // 保留7天的日志
+            var retentionPeriod = TimeSpan.FromDays(3); // 保留3天的日志
             var validLines = new List<string>();
             string pattern = @"Generated at: (?<generatedTime>[\d\- :]+)";
+            const long maxFileSize = 300 * 1024; // 300KB
 
             if (File.Exists(LogFilePath))
             {
-                var lines = File.ReadAllLines(LogFilePath);
-                var logEntries = new List<(DateTime generatedTime, string line)>();
-
-                foreach (var line in lines)
+                var fileInfo = new FileInfo(LogFilePath);
+                if (fileInfo.Length > maxFileSize)
                 {
-                    var match = Regex.Match(line, pattern);
-                    if (match.Success)
+                    var lines = File.ReadAllLines(LogFilePath);
+                    var logEntries = new List<(DateTime generatedTime, string line)>();
+
+                    foreach (var line in lines)
                     {
-                        if (DateTime.TryParse(match.Groups["generatedTime"].Value, out var generatedDate))
+                        var match = Regex.Match(line, pattern);
+                        if (match.Success)
                         {
-                            logEntries.Add((generatedDate, line));
+                            if (DateTime.TryParse(match.Groups["generatedTime"].Value, out var generatedDate))
+                            {
+                                logEntries.Add((generatedDate, line));
+                            }
                         }
                     }
-                }
 
-                if (logEntries.Any())
-                {
-                    // 按生成时间排序
-                    logEntries = logEntries.OrderByDescending(entry => entry.generatedTime).ToList();
+                    if (logEntries.Any())
+                    {
+                        // 按生成时间排序
+                        logEntries = logEntries.OrderByDescending(entry => entry.generatedTime).ToList();
 
-                    // 取最近七天的日志
-                    var cutoffDate = logEntries.First().generatedTime - retentionPeriod;
-                    validLines = logEntries.Where(entry => entry.generatedTime >= cutoffDate).Select(entry => entry.line).ToList();
+                        // 取最近三天的日志
+                        var cutoffDate = logEntries.First().generatedTime - retentionPeriod;
+                        validLines = logEntries.Where(entry => entry.generatedTime >= cutoffDate).Select(entry => entry.line).ToList();
 
-                    File.WriteAllLines(LogFilePath, validLines);
+                        File.WriteAllLines(LogFilePath, validLines);
+                    }
                 }
             }
         }

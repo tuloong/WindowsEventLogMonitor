@@ -50,4 +50,67 @@ internal class EventLogReader
         return filteredEntries;
     }
 
+    /// <summary>
+    /// 专门用于收集SQL Server相关的登录日志
+    /// </summary>
+    /// <param name="includeMSSQLSERVER">是否包含MSSQLSERVER源的日志</param>
+    /// <param name="includeWindowsAuth">是否包含Windows身份验证相关日志</param>
+    /// <returns></returns>
+    public List<EventLogEntry> GetSQLServerLoginLogs(bool includeMSSQLSERVER = true, bool includeWindowsAuth = true)
+    {
+        var sqlServerLogs = new List<EventLogEntry>();
+
+        // 收集MSSQLSERVER相关的日志（事件ID 18456=登录失败, 18453=登录成功, 18454=登录成功已验证）
+        if (includeMSSQLSERVER)
+        {
+            var mssqlLogs = eventLog.Entries.Cast<EventLogEntry>()
+                .Where(entry => entry.Source == "MSSQLSERVER" &&
+                       (entry.InstanceId == 18456 || entry.InstanceId == 18453 || entry.InstanceId == 18454))
+                .ToList();
+            sqlServerLogs.AddRange(mssqlLogs);
+        }
+
+        // 收集Windows身份验证相关的日志（从Security日志）
+        if (includeWindowsAuth)
+        {
+            try
+            {
+                using (var securityLog = new EventLog("Security"))
+                {
+                    var authLogs = securityLog.Entries.Cast<EventLogEntry>()
+                        .Where(entry =>
+                            (entry.InstanceId == 4624 || entry.InstanceId == 4625) && // 登录成功/失败
+                            entry.Message != null &&
+                            entry.Message.Contains("SQL", StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                    sqlServerLogs.AddRange(authLogs);
+                }
+            }
+            catch (Exception ex)
+            {
+                // 可能没有权限访问Security日志，记录但不影响其他日志收集
+                Console.WriteLine($"无法访问Security日志: {ex.Message}");
+            }
+        }
+
+        return sqlServerLogs.OrderByDescending(log => log.TimeGenerated).ToList();
+    }
+
+    /// <summary>
+    /// 根据时间范围过滤日志
+    /// </summary>
+    public List<EventLogEntry> FilterByTimeRange(List<EventLogEntry> logs, DateTime startTime, DateTime endTime)
+    {
+        return logs.Where(log => log.TimeGenerated >= startTime && log.TimeGenerated <= endTime).ToList();
+    }
+
+    /// <summary>
+    /// 获取特定事件ID的日志
+    /// </summary>
+    public List<EventLogEntry> FilterByEventIds(string source, params long[] eventIds)
+    {
+        return eventLog.Entries.Cast<EventLogEntry>()
+            .Where(entry => entry.Source == source && eventIds.Contains(entry.InstanceId))
+            .ToList();
+    }
 }

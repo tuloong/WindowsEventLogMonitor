@@ -1,3 +1,30 @@
 {
-  "ApiUrl": "http://localhost:5000/api/aa/WindowsEventMonitor/SaveEventLog"
+  "ApiUrl": "http://localhost:5000/api/aa/WindowsEventMonitor/SaveEventLog",
+  "SqlServerMonitoring": {
+    "Enabled": true,
+    "MonitorIntervalSeconds": 30,
+    "BatchSize": 10,
+    "IncludeMSSQLSERVER": true,
+    "IncludeWindowsAuth": true,
+    "EventIds": {
+      "SQLLoginSuccess": 18453,
+      "SQLLoginFailure": 18456,
+      "WindowsLoginSuccess": 4624,
+      "WindowsLoginFailure": 4625
+    }
+  },
+  "RetryPolicy": {
+    "MaxRetries": 3,
+    "RetryDelaySeconds": 5,
+    "EnableRetry": true
+  },
+  "LogRetention": {
+    "RetentionDays": 7,
+    "MaxLogFileSizeKB": 500
+  },
+  "Security": {
+    "UseHttps": false,
+    "ApiKey": "",
+    "TimeoutSeconds": 30
+  }
 }

@@ -22,7 +22,7 @@ namespace WindowsEventLogMonitor
         private JsonService jsonService;
         private HttpService httpService;
         private Config config;
-        private const string LogFilePath = "push_log.ini";
+        private const string LogType = "push_log";
         private bool isMonitoring = false;
         private bool isSQLServerMonitoring = false;
         private System.Threading.Timer logCleanTimer;
@@ -45,6 +45,10 @@ namespace WindowsEventLogMonitor
             InitializeServices();
             LoadConfiguration();
             InitializeTimers();
+
+            // 初始化日志文件管理器
+            LogFileManager.Initialize();
+
             UpdateServiceStatus();
         }
 
@@ -82,7 +86,7 @@ namespace WindowsEventLogMonitor
 
         private void InitializeTimers()
         {
-            // 日志清理定时器
+            // 日志清理定时器 - 每天执行一次
             logCleanTimer = new System.Threading.Timer(_ => CleanLogFile(), null, TimeSpan.Zero, TimeSpan.FromDays(1));
 
             // 状态更新定时器
@@ -152,7 +156,7 @@ namespace WindowsEventLogMonitor
                 LogMessage("开始刷新SQL Server日志...");
 
                 // 立即收集可用的日志数据
-                var collectedCount = await sqlServerLogMonitor.CollectAvailableLogsAsync(24); // 收集最近24小时的日志
+                var collectedCount = await sqlServerLogMonitor.CollectAvailableLogsAsync(1); // 收集最近1分钟的日志
 
                 // 更新显示
                 await UpdateSQLServerLogDisplay();
@@ -255,7 +259,7 @@ namespace WindowsEventLogMonitor
                     try
                     {
                         LogMessage("正在收集历史SQL Server日志...");
-                        var count = await sqlServerLogMonitor.CollectAvailableLogsAsync(6); // 收集最近6小时的日志
+                        var count = await sqlServerLogMonitor.CollectAvailableLogsAsync(1); // 收集最近1分钟的日志
 
                         this.Invoke(new Action(async () =>
                         {
@@ -447,6 +451,8 @@ namespace WindowsEventLogMonitor
                 var pushedLogIds = LoadPushedLogIds();
                 var newLogs = logs.Where(log => !pushedLogIds.Contains(GenerateUniqueKey(log))).ToList();
 
+                LogMessage($"从 {selectedSource} 加载了 {logs.Count} 条日志，其中 {pushedLogIds.Count} 条已推送，{newLogs.Count} 条新日志");
+
                 if (newLogs.Count == 0)
                 {
                     MessageBox.Show("没有新的日志需要推送", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -458,13 +464,10 @@ namespace WindowsEventLogMonitor
 
                 // 记录推送信息
                 var logTime = DateTime.Now;
-                using (var writer = new StreamWriter(LogFilePath, true))
+                foreach (var log in newLogs)
                 {
-                    foreach (var log in newLogs)
-                    {
-                        var logEntry = $"Log ID: {GenerateUniqueKey(log)}, Pushed at: {logTime}";
-                        writer.WriteLine(logEntry);
-                    }
+                    var logEntry = $"Log ID: {GenerateUniqueKey(log)}, Generated at: {log.TimeGenerated}, Pushed at: {logTime}";
+                    LogFileManager.WriteLogEntry(LogType, logEntry);
                 }
 
                 logsUploaded += newLogs.Count;
@@ -879,9 +882,9 @@ namespace WindowsEventLogMonitor
 
             // 限制日志行数
             var lines = textBoxServiceLog.Lines;
-            if (lines.Length > 1000)
+            if (lines.Length > 200)
             {
-                var keepLines = lines.Skip(lines.Length - 500).ToArray();
+                var keepLines = lines.Skip(lines.Length - 100).ToArray();
                 textBoxServiceLog.Lines = keepLines;
             }
         }
@@ -1001,6 +1004,7 @@ namespace WindowsEventLogMonitor
 
                     if (newLogs.Count > 0)
                     {
+                        LogMessage($"发现 {newLogs.Count} 条新日志，准备处理");
                         await HandleNewLogs(newLogs);
                     }
                     else
@@ -1074,10 +1078,7 @@ namespace WindowsEventLogMonitor
 
             var logTime = DateTime.Now;
             var logEntryStrings = $"Log ID: {GenerateUniqueKey(logEntry)},Generated at: {logEntry.TimeGenerated},Pushed at: {logTime}";
-            using (var writer = new StreamWriter(LogFilePath, true))
-            {
-                await writer.WriteLineAsync(logEntryStrings);
-            }
+            await LogFileManager.WriteLogEntryAsync(LogType, logEntryStrings);
 
             totalLogsProcessed++;
             logsUploaded++;
@@ -1086,51 +1087,12 @@ namespace WindowsEventLogMonitor
 
         private DateTime GetMaxGeneratedTime()
         {
-            DateTime maxGeneratedTime = DateTime.MinValue;
-            string pattern = @"Generated at: (?<generatedTime>[\d\- :]+)";
-
-            if (File.Exists(LogFilePath))
-            {
-                var lines = File.ReadAllLines(LogFilePath);
-                foreach (var line in lines)
-                {
-                    var match = Regex.Match(line, pattern);
-                    if (match.Success)
-                    {
-                        if (DateTime.TryParse(match.Groups["generatedTime"].Value, out var generatedDate))
-                        {
-                            if (generatedDate > maxGeneratedTime)
-                            {
-                                maxGeneratedTime = generatedDate;
-                            }
-                        }
-                    }
-                }
-            }
-
-            return maxGeneratedTime;
+            return LogFileManager.GetLastProcessedTime(LogType);
         }
 
         private HashSet<string> LoadPushedLogIds()
         {
-            var pushedLogIds = new HashSet<string>();
-            if (File.Exists(LogFilePath))
-            {
-                var lines = File.ReadAllLines(LogFilePath);
-                foreach (var line in lines)
-                {
-                    var parts = line.Split(',');
-                    if (parts.Length > 0)
-                    {
-                        var logIdPart = parts[0].Split(':');
-                        if (logIdPart.Length > 1)
-                        {
-                            pushedLogIds.Add(logIdPart[1].Trim());
-                        }
-                    }
-                }
-            }
-            return pushedLogIds;
+            return LogFileManager.LoadPushedLogIds(LogType);
         }
 
         private string GenerateUniqueKey(EventLogEntry log)
@@ -1180,41 +1142,8 @@ namespace WindowsEventLogMonitor
 
         private void CleanLogFile()
         {
-            var retentionPeriod = TimeSpan.FromDays(config?.LogRetention?.RetentionDays ?? 3);
-            var validLines = new List<string>();
-            string pattern = @"Generated at: (?<generatedTime>[\d\- :]+)";
-            var maxFileSize = (config?.LogRetention?.MaxLogFileSizeKB ?? 300) * 1024;
-
-            if (File.Exists(LogFilePath))
-            {
-                var fileInfo = new FileInfo(LogFilePath);
-                if (fileInfo.Length > maxFileSize)
-                {
-                    var lines = File.ReadAllLines(LogFilePath);
-                    var logEntries = new List<(DateTime generatedTime, string line)>();
-
-                    foreach (var line in lines)
-                    {
-                        var match = Regex.Match(line, pattern);
-                        if (match.Success)
-                        {
-                            if (DateTime.TryParse(match.Groups["generatedTime"].Value, out var generatedDate))
-                            {
-                                logEntries.Add((generatedDate, line));
-                            }
-                        }
-                    }
-
-                    if (logEntries.Any())
-                    {
-                        logEntries = logEntries.OrderByDescending(entry => entry.generatedTime).ToList();
-                        var cutoffDate = logEntries.First().generatedTime - retentionPeriod;
-                        validLines = logEntries.Where(entry => entry.generatedTime >= cutoffDate).Select(entry => entry.line).ToList();
-
-                        File.WriteAllLines(LogFilePath, validLines);
-                    }
-                }
-            }
+            var retentionDays = config?.LogRetention?.RetentionDays ?? 3;
+            LogFileManager.CleanupOldLogFiles(retentionDays);
         }
 
         #endregion

@@ -16,18 +16,31 @@ public class SqlServerLogMonitor
     private readonly EventLogReader applicationLogReader;
     private readonly EventLogReader securityLogReader;
     private readonly HttpService httpService;
-    private readonly string logFilePath = "sql_server_push_log.ini";
     private bool isMonitoring = false;
 
     // 缓存最新收集的日志，供UI显示使用
     private readonly List<SqlServerLogEntry> recentLogs = new List<SqlServerLogEntry>();
     private readonly object recentLogsLock = new object();
 
+    // 启动时间管理
+    private DateTime currentStartupTime;
+    private DateTime lastProcessedTime;
+    private readonly object startupTimeLock = new object();
+
     public SqlServerLogMonitor()
     {
         applicationLogReader = new EventLogReader("Application");
         securityLogReader = new EventLogReader("Security");
         httpService = new HttpService();
+
+        // 初始化启动时间
+        lock (startupTimeLock)
+        {
+            currentStartupTime = DateTime.Now;
+            lastProcessedTime = currentStartupTime;
+        }
+
+        Console.WriteLine($"SQL Server监控器启动时间: {currentStartupTime:yyyy-MM-dd HH:mm:ss}");
     }
 
     /// <summary>
@@ -86,22 +99,55 @@ public class SqlServerLogMonitor
     }
 
     /// <summary>
+    /// 获取当前启动时间
+    /// </summary>
+    public DateTime GetCurrentStartupTime()
+    {
+        lock (startupTimeLock)
+        {
+            return currentStartupTime;
+        }
+    }
+
+    /// <summary>
+    /// 获取最后处理时间
+    /// </summary>
+    public DateTime GetLastProcessedTime()
+    {
+        lock (startupTimeLock)
+        {
+            return lastProcessedTime;
+        }
+    }
+
+    /// <summary>
+    /// 重置启动时间（当需要重新开始处理时）
+    /// </summary>
+    public void ResetStartupTime()
+    {
+        lock (startupTimeLock)
+        {
+            currentStartupTime = DateTime.Now;
+            lastProcessedTime = currentStartupTime;
+        }
+        Console.WriteLine($"重置启动时间为: {currentStartupTime:yyyy-MM-dd HH:mm:ss}");
+    }
+
+    /// <summary>
     /// 立即收集可用的SQL Server日志（用于刷新功能）
     /// </summary>
-    /// <param name="hoursBack">收集最近几小时的日志，默认24小时</param>
+    /// <param name="minutesBack">收集最近几分钟的日志，默认24小时</param>
     /// <returns>收集到的日志数量</returns>
-    public async Task<int> CollectAvailableLogsAsync(int hoursBack = 24)
+    public async Task<int> CollectAvailableLogsAsync(int minutesBack = 1)
     {
         try
         {
-            var startTime = DateTime.Now.AddHours(-hoursBack);
+            var endTime = DateTime.Now;
+            var startTime = endTime.AddMinutes(-minutesBack);
 
-            // 先测试能否直接获取到任何SQL Server日志
-            Console.WriteLine("开始测试SQL Server日志读取...");
-            var testLogs = await TestDirectLogReading();
-            Console.WriteLine($"直接读取测试结果: {testLogs} 条日志");
+            Console.WriteLine($"立即收集日志 - 时间范围: {startTime:yyyy-MM-dd HH:mm:ss} 到 {endTime:yyyy-MM-dd HH:mm:ss}");
 
-            var newLogs = await GetAvailableLogsAsync(startTime);
+            var newLogs = await GetNewSQLServerLogsByTimeRangeAsync(startTime, endTime);
 
             if (newLogs.Count > 0)
             {
@@ -124,42 +170,74 @@ public class SqlServerLogMonitor
     }
 
     /// <summary>
-    /// 测试直接读取SQL Server日志
+    /// 收集并推送SQL Server日志 - 按启动时间管理，避免重复
     /// </summary>
-    private async Task<int> TestDirectLogReading()
+    public async Task CollectAndPushSQLServerLogsAsync(string apiUrl)
     {
-        return await Task.Run(() =>
+        DateTime processingStartTime;
+        DateTime currentLastProcessedTime;
+
+        // 获取当前处理的时间范围
+        lock (startupTimeLock)
         {
-            try
-            {
-                var eventLogReader = new EventLogReader("Application");
-                // 直接调用EventLogReader的方法，不加任何过滤
-                var allLogs = eventLogReader.GetSQLServerLoginLogs(includeMSSQLSERVER: true, includeWindowsAuth: false);
-                Console.WriteLine($"EventLogReader.GetSQLServerLoginLogs返回 {allLogs.Count} 条日志");
+            processingStartTime = DateTime.Now;
+            currentLastProcessedTime = lastProcessedTime;
+        }
 
-                // 显示最近几条日志的信息
-                var recentLogs = allLogs.Take(5).ToList();
-                foreach (var log in recentLogs)
+        Console.WriteLine($"开始收集日志 - 处理时间范围: {currentLastProcessedTime:yyyy-MM-dd HH:mm:ss} 到 {processingStartTime:yyyy-MM-dd HH:mm:ss}");
+
+        // 第一步：按当前启动时间开始，从缓存中加载日志
+        var sqlServerLogs = await GetNewSQLServerLogsByTimeRangeAsync(currentLastProcessedTime, processingStartTime);
+
+        if (sqlServerLogs.Count > 0)
+        {
+            Console.WriteLine($"收集到 {sqlServerLogs.Count} 条新的SQL Server日志");
+
+            // 第二步：加载完记录的日志 - 更新缓存供UI显示
+            UpdateRecentLogsCache(sqlServerLogs);
+
+            // 第三步：更新启动时间（在推送前更新，确保即使推送失败也不会重复处理）
+            lock (startupTimeLock)
+            {
+                lastProcessedTime = processingStartTime;
+            }
+            Console.WriteLine($"更新最后处理时间为: {processingStartTime:yyyy-MM-dd HH:mm:ss}");
+
+            // 第四步：推送日志
+            bool pushSuccess = await ProcessLogsInBatchesAsync(sqlServerLogs, apiUrl, batchSize: 10);
+
+            if (pushSuccess)
+            {
+                // 第五步：推送成功后清除已处理的日志缓存（保留最近日志用于UI显示）
+                Console.WriteLine("推送成功，日志处理完成");
+
+                // 第六步：重新按更新后的启动时间读取日志（为下次处理做准备）
+                Console.WriteLine("准备下次处理周期...");
+            }
+            else
+            {
+                // 推送失败，回滚最后处理时间
+                lock (startupTimeLock)
                 {
-                    Console.WriteLine($"日志: {log.TimeGenerated} - 事件ID: {log.InstanceId} - 来源: {log.Source}");
+                    lastProcessedTime = currentLastProcessedTime;
                 }
-
-                return allLogs.Count;
+                Console.WriteLine($"推送失败，回滚最后处理时间为: {currentLastProcessedTime:yyyy-MM-dd HH:mm:ss}");
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"测试直接读取时发生错误: {ex.Message}");
-                return 0;
-            }
-        });
+        }
+        else
+        {
+            Console.WriteLine("没有新的SQL Server日志需要推送");
+        }
     }
 
     /// <summary>
-    /// 获取指定时间段内可用的SQL Server日志
+    /// 按时间范围获取SQL Server日志
     /// </summary>
-    private async Task<List<SqlServerLogEntry>> GetAvailableLogsAsync(DateTime startTime)
+    private async Task<List<SqlServerLogEntry>> GetNewSQLServerLogsByTimeRangeAsync(DateTime startTime, DateTime endTime)
     {
-        var allLogs = new List<SqlServerLogEntry>();
+        var newLogs = new List<SqlServerLogEntry>();
+
+        Console.WriteLine($"收集时间范围内的日志: {startTime:yyyy-MM-dd HH:mm:ss} 到 {endTime:yyyy-MM-dd HH:mm:ss}");
 
         // 从Application日志收集MSSQLSERVER日志
         await Task.Run(() =>
@@ -167,15 +245,17 @@ public class SqlServerLogMonitor
             try
             {
                 var eventLogReader = new EventLogReader("Application");
-                var allMssqlLogs = eventLogReader.FilterByEventIds("MSSQLSERVER", 18456, 18453, 18454);
-                var mssqlLogs = allMssqlLogs.Where(log => log.TimeGenerated >= startTime).ToList();
+                var allMssqlLogs = eventLogReader.FilterEventLogEntries("MSSQLSERVER", string.Empty);
 
-                Console.WriteLine($"从Application日志中总共找到 {allMssqlLogs.Count} 条MSSQLSERVER日志");
-                Console.WriteLine($"时间过滤后剩余 {mssqlLogs.Count} 条日志 (起始时间: {startTime:yyyy-MM-dd HH:mm:ss})");
+                var mssqlLogs = allMssqlLogs
+                    .Where(log => log.TimeGenerated >= startTime && log.TimeGenerated < endTime)
+                    .ToList();
+
+                Console.WriteLine($"从Application日志中找到 {mssqlLogs.Count} 条MSSQLSERVER日志（时间范围内）");
 
                 foreach (var log in mssqlLogs)
                 {
-                    allLogs.Add(new SqlServerLogEntry
+                    newLogs.Add(new SqlServerLogEntry
                     {
                         UniqueKey = GenerateUniqueKey(log),
                         TimeGenerated = log.TimeGenerated,
@@ -205,15 +285,16 @@ public class SqlServerLogMonitor
                 {
                     var authLogs = securityLogReader.FilterByEventIds("Microsoft-Windows-Security-Auditing", 4624, 4625)
                         .Where(log => log.TimeGenerated >= startTime &&
+                                     log.TimeGenerated < endTime &&
                                      log.Message != null &&
                                      log.Message.Contains("SQL", StringComparison.OrdinalIgnoreCase))
                         .ToList();
 
-                    Console.WriteLine($"从Security日志中找到 {authLogs.Count} 条Windows身份验证日志");
+                    Console.WriteLine($"从Security日志中找到 {authLogs.Count} 条Windows身份验证日志（时间范围内）");
 
                     foreach (var log in authLogs)
                     {
-                        allLogs.Add(new SqlServerLogEntry
+                        newLogs.Add(new SqlServerLogEntry
                         {
                             UniqueKey = GenerateUniqueKey(log),
                             TimeGenerated = log.TimeGenerated,
@@ -239,114 +320,16 @@ public class SqlServerLogMonitor
             Console.WriteLine($"无法访问Security日志: {ex.Message}");
         }
 
-        return allLogs.OrderByDescending(log => log.TimeGenerated).ToList();
-    }
-
-    /// <summary>
-    /// 收集并推送SQL Server日志
-    /// </summary>
-    public async Task CollectAndPushSQLServerLogsAsync(string apiUrl)
-    {
-        var pushedLogIds = LoadPushedLogIds();
-        var lastProcessedTime = GetLastProcessedTime();
-
-        // 收集SQL Server登录日志
-        var sqlServerLogs = await GetNewSQLServerLogsAsync(lastProcessedTime, pushedLogIds);
-
-        if (sqlServerLogs.Count > 0)
-        {
-            // 更新最近日志缓存（供UI显示）
-            UpdateRecentLogsCache(sqlServerLogs);
-
-            // 批量处理日志
-            await ProcessLogsInBatchesAsync(sqlServerLogs, apiUrl, batchSize: 10);
-
-            // 更新已处理日志记录
-            await UpdateProcessedLogsAsync(sqlServerLogs);
-        }
-    }
-
-    /// <summary>
-    /// 获取新的SQL Server日志
-    /// </summary>
-    private async Task<List<SqlServerLogEntry>> GetNewSQLServerLogsAsync(DateTime lastProcessedTime, HashSet<string> pushedLogIds)
-    {
-        var newLogs = new List<SqlServerLogEntry>();
-
-        // 从Application日志收集MSSQLSERVER日志
-        await Task.Run(() =>
-        {
-            var eventLogReader = new EventLogReader("Application");
-            var allMssqlLogs = eventLogReader.FilterEventLogEntries("MSSQLSERVER", string.Empty);
-
-            var mssqlLogs = allMssqlLogs
-                .Where(log => log.TimeGenerated > lastProcessedTime &&
-                             !pushedLogIds.Contains(GenerateUniqueKey(log)))
-                .ToList();
-
-            Console.WriteLine($"找到 {allMssqlLogs.Count} 条MSSQLSERVER日志，过滤后剩余 {mssqlLogs.Count} 条新日志");
-
-            foreach (var log in mssqlLogs)
-            {
-                newLogs.Add(new SqlServerLogEntry
-                {
-                    UniqueKey = GenerateUniqueKey(log),
-                    TimeGenerated = log.TimeGenerated,
-                    EventId = (int)log.InstanceId,
-                    Source = log.Source,
-                    EntryType = log.EntryType.ToString(),
-                    Message = log.Message,
-                    LogType = GetLogType(log.InstanceId),
-                    UserName = ExtractUserNameFromMessage(log.Message),
-                    ClientIP = ExtractClientIPFromMessage(log.Message),
-                    DatabaseName = ExtractDatabaseNameFromMessage(log.Message)
-                });
-            }
-        });
-
-        // 如果有权限，也从Security日志收集相关的Windows身份验证日志
-        try
-        {
-            await Task.Run(() =>
-            {
-                var authLogs = securityLogReader.FilterByEventIds("Microsoft-Windows-Security-Auditing", 4624, 4625)
-                    .Where(log => log.TimeGenerated > lastProcessedTime &&
-                                 log.Message != null &&
-                                 log.Message.Contains("SQL", StringComparison.OrdinalIgnoreCase) &&
-                                 !pushedLogIds.Contains(GenerateUniqueKey(log)))
-                    .ToList();
-
-                foreach (var log in authLogs)
-                {
-                    newLogs.Add(new SqlServerLogEntry
-                    {
-                        UniqueKey = GenerateUniqueKey(log),
-                        TimeGenerated = log.TimeGenerated,
-                        EventId = (int)log.InstanceId,
-                        Source = log.Source,
-                        EntryType = log.EntryType.ToString(),
-                        Message = log.Message,
-                        LogType = log.InstanceId == 4624 ? "Windows登录成功" : "Windows登录失败",
-                        UserName = ExtractWindowsUserNameFromMessage(log.Message),
-                        ClientIP = ExtractWindowsClientIPFromMessage(log.Message),
-                        DatabaseName = ""
-                    });
-                }
-            });
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"无法访问Security日志: {ex.Message}");
-        }
-
         return newLogs.OrderBy(log => log.TimeGenerated).ToList();
     }
 
     /// <summary>
     /// 批量处理日志
     /// </summary>
-    private async Task ProcessLogsInBatchesAsync(List<SqlServerLogEntry> logs, string apiUrl, int batchSize = 10)
+    private async Task<bool> ProcessLogsInBatchesAsync(List<SqlServerLogEntry> logs, string apiUrl, int batchSize = 10)
     {
+        bool allBatchesSuccessful = true;
+
         for (int i = 0; i < logs.Count; i += batchSize)
         {
             var batch = logs.Skip(i).Take(batchSize).ToList();
@@ -360,9 +343,12 @@ public class SqlServerLogMonitor
             catch (Exception ex)
             {
                 Console.WriteLine($"推送日志失败: {ex.Message}");
-                // 可以考虑重试机制或将失败的日志保存到本地
+                allBatchesSuccessful = false;
+                // 继续处理剩余批次，但标记为失败
             }
         }
+
+        return allBatchesSuccessful;
     }
 
     private string GetLogType(long eventId)
@@ -485,55 +471,6 @@ public class SqlServerLogMonitor
         return $"{log.InstanceId}_{timeStamp}_{log.TimeGenerated.Ticks}_{log.Source}";
     }
 
-    private HashSet<string> LoadPushedLogIds()
-    {
-        var pushedLogIds = new HashSet<string>();
-        if (File.Exists(logFilePath))
-        {
-            var lines = File.ReadAllLines(logFilePath);
-            foreach (var line in lines)
-            {
-                var parts = line.Split(',');
-                if (parts.Length > 0)
-                {
-                    var logIdPart = parts[0].Split(':');
-                    if (logIdPart.Length > 1)
-                    {
-                        pushedLogIds.Add(logIdPart[1].Trim());
-                    }
-                }
-            }
-        }
-        return pushedLogIds;
-    }
-
-    private DateTime GetLastProcessedTime()
-    {
-        DateTime maxProcessedTime = DateTime.MinValue;
-        string pattern = @"Generated at: (?<generatedTime>[\d\-/\s:]+)";
-
-        if (File.Exists(logFilePath))
-        {
-            var lines = File.ReadAllLines(logFilePath);
-            foreach (var line in lines)
-            {
-                var match = System.Text.RegularExpressions.Regex.Match(line, pattern);
-                if (match.Success)
-                {
-                    if (DateTime.TryParse(match.Groups["generatedTime"].Value, out var generatedDate))
-                    {
-                        if (generatedDate > maxProcessedTime)
-                        {
-                            maxProcessedTime = generatedDate;
-                        }
-                    }
-                }
-            }
-        }
-
-        return maxProcessedTime;
-    }
-
     /// <summary>
     /// 更新最近日志缓存
     /// </summary>
@@ -544,24 +481,11 @@ public class SqlServerLogMonitor
             // 将新日志添加到缓存前面（最新的在前面）
             recentLogs.InsertRange(0, newLogs.OrderByDescending(log => log.TimeGenerated));
 
-            // 只保留最近1000条日志，避免内存过大
-            if (recentLogs.Count > 1000)
+            // 只保留最近200条日志，避免内存过大
+            if (recentLogs.Count > 200)
             {
-                var excessCount = recentLogs.Count - 1000;
-                recentLogs.RemoveRange(1000, excessCount);
-            }
-        }
-    }
-
-    private async Task UpdateProcessedLogsAsync(List<SqlServerLogEntry> logs)
-    {
-        var logTime = DateTime.Now;
-        using (var writer = new StreamWriter(logFilePath, true))
-        {
-            foreach (var log in logs)
-            {
-                var logEntry = $"Log ID: {log.UniqueKey}, Generated at: {log.TimeGenerated}, Pushed at: {logTime}";
-                await writer.WriteLineAsync(logEntry);
+                var excessCount = recentLogs.Count - 200;
+                recentLogs.RemoveRange(200, excessCount);
             }
         }
     }

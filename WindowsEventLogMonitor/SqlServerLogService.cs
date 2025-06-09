@@ -15,7 +15,7 @@ public class SqlServerLogService : ServiceBase
     private Config config;
     private CancellationTokenSource cancellationTokenSource;
     private Task monitoringTask;
-    private readonly string logFile = "service_log.txt";
+    private readonly string serviceLogType = "service_log";
 
     public SqlServerLogService()
     {
@@ -32,6 +32,9 @@ public class SqlServerLogService : ServiceBase
     {
         try
         {
+            // 初始化日志文件管理器
+            LogFileManager.Initialize();
+
             WriteLog("SQL Server日志监控服务正在启动...");
 
             // 加载配置
@@ -138,11 +141,7 @@ public class SqlServerLogService : ServiceBase
     {
         try
         {
-            var logMessage = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}";
-            File.AppendAllText(logFile, logMessage + Environment.NewLine);
-
-            // 保持日志文件大小在合理范围内
-            ManageLogFileSize();
+            LogFileManager.WriteLogEntry(serviceLogType, message);
         }
         catch
         {
@@ -151,30 +150,12 @@ public class SqlServerLogService : ServiceBase
     }
 
     /// <summary>
-    /// 管理日志文件大小
+    /// 管理日志文件大小（现在由LogFileManager自动处理）
     /// </summary>
     private void ManageLogFileSize()
     {
-        try
-        {
-            if (File.Exists(logFile))
-            {
-                var fileInfo = new FileInfo(logFile);
-                var maxSizeBytes = config?.LogRetention?.MaxLogFileSizeKB * 1024 ?? 500 * 1024;
-
-                if (fileInfo.Length > maxSizeBytes)
-                {
-                    // 保留最后一半的内容
-                    var lines = File.ReadAllLines(logFile);
-                    var keepLines = lines.Skip(lines.Length / 2).ToArray();
-                    File.WriteAllLines(logFile, keepLines);
-                }
-            }
-        }
-        catch
-        {
-            // 忽略日志管理错误
-        }
+        // 日志文件管理现在由LogFileManager自动处理
+        // 这个方法保留为空以保持兼容性
     }
 
     /// <summary>

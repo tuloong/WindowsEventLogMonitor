@@ -36,6 +36,30 @@ namespace WindowsEventLogMonitor
                         RunAsService();
                         return;
 
+                    case "test-logid":
+                        LogIdTestTool.TestLogIdExtraction();
+                        return;
+
+                    case "analyze-duplicates":
+                        var logType = args.Length > 1 ? args[1] : "sql_server_push_log";
+                        LogIdTestTool.AnalyzeDuplicateIds(logType);
+                        return;
+
+                    case "cleanup-duplicates":
+                        var cleanupLogType = args.Length > 1 ? args[1] : "sql_server_push_log";
+                        Console.WriteLine("警告：此操作将删除重复的日志记录！");
+                        Console.Write("确认继续？(y/N): ");
+                        var confirm = Console.ReadLine();
+                        if (confirm?.ToLower() == "y" || confirm?.ToLower() == "yes")
+                        {
+                            LogIdTestTool.CleanupDuplicateRecords(cleanupLogType);
+                        }
+                        else
+                        {
+                            Console.WriteLine("操作已取消");
+                        }
+                        return;
+
                     case "--help":
                     case "-h":
                         ShowHelp();
@@ -110,18 +134,25 @@ namespace WindowsEventLogMonitor
             Console.WriteLine("SQL Server 日志监控器 v2.0");
             Console.WriteLine("");
             Console.WriteLine("用法:");
-            Console.WriteLine("  WindowsEventLogMonitor.exe              - 图形界面模式");
-            Console.WriteLine("  WindowsEventLogMonitor.exe install      - 安装Windows服务");
-            Console.WriteLine("  WindowsEventLogMonitor.exe uninstall    - 卸载Windows服务");
-            Console.WriteLine("  WindowsEventLogMonitor.exe service      - 以服务模式运行");
-            Console.WriteLine("  WindowsEventLogMonitor.exe console      - 以控制台模式运行");
-            Console.WriteLine("  WindowsEventLogMonitor.exe --help       - 显示此帮助信息");
+            Console.WriteLine("  WindowsEventLogMonitor.exe                          - 图形界面模式");
+            Console.WriteLine("  WindowsEventLogMonitor.exe install                  - 安装Windows服务");
+            Console.WriteLine("  WindowsEventLogMonitor.exe uninstall                - 卸载Windows服务");
+            Console.WriteLine("  WindowsEventLogMonitor.exe service                  - 以服务模式运行");
+            Console.WriteLine("  WindowsEventLogMonitor.exe console                  - 以控制台模式运行");
+            Console.WriteLine("  WindowsEventLogMonitor.exe test-logid               - 测试日志ID提取功能");
+            Console.WriteLine("  WindowsEventLogMonitor.exe analyze-duplicates [type] - 分析重复的日志记录");
+            Console.WriteLine("  WindowsEventLogMonitor.exe cleanup-duplicates [type] - 清理重复的日志记录");
+            Console.WriteLine("  WindowsEventLogMonitor.exe --help                   - 显示此帮助信息");
+            Console.WriteLine("");
+            Console.WriteLine("参数说明:");
+            Console.WriteLine("  [type] - 日志类型，可选值: sql_server_push_log, push_log (默认: sql_server_push_log)");
             Console.WriteLine("");
             Console.WriteLine("注意:");
             Console.WriteLine("- 安装/卸载服务需要管理员权限");
             Console.WriteLine("- 服务模式由Windows服务管理器控制");
             Console.WriteLine("- 控制台模式用于调试和测试");
             Console.WriteLine("- 配置文件: config.json");
+            Console.WriteLine("- cleanup-duplicates 会备份原文件");
             Console.WriteLine("");
             Console.WriteLine("示例:");
             Console.WriteLine("  # 安装并启动服务");
@@ -130,6 +161,11 @@ namespace WindowsEventLogMonitor
             Console.WriteLine("");
             Console.WriteLine("  # 调试模式运行");
             Console.WriteLine("  WindowsEventLogMonitor.exe console");
+            Console.WriteLine("");
+            Console.WriteLine("  # 测试和修复重复日志问题");
+            Console.WriteLine("  WindowsEventLogMonitor.exe test-logid");
+            Console.WriteLine("  WindowsEventLogMonitor.exe analyze-duplicates");
+            Console.WriteLine("  WindowsEventLogMonitor.exe cleanup-duplicates sql_server_push_log");
         }
     }
 }

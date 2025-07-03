@@ -27,6 +27,7 @@ namespace WindowsEventLogMonitor
         private bool isSQLServerMonitoring = false;
         private System.Threading.Timer logCleanTimer;
         private System.Threading.Timer statusUpdateTimer;
+        private System.Threading.Timer sqlServerLogRefreshTimer;
 
         // 添加SQL Server监控的取消令牌和任务
         private CancellationTokenSource sqlServerMonitoringCancellationTokenSource;
@@ -50,6 +51,9 @@ namespace WindowsEventLogMonitor
             LogFileManager.Initialize();
 
             UpdateServiceStatus();
+
+            // 初始化自动刷新状态显示
+            UpdateAutoRefreshStatusDisplay();
         }
 
         private void InitializeServices()
@@ -91,6 +95,38 @@ namespace WindowsEventLogMonitor
 
             // 状态更新定时器
             statusUpdateTimer = new System.Threading.Timer(_ => UpdateStatusDisplay(), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+
+            // SQL Server日志自动刷新定时器 - 使用配置文件中的间隔
+            InitializeSQLServerRefreshTimer();
+        }
+
+        private void InitializeSQLServerRefreshTimer()
+        {
+            // 先清理现有的定时器
+            sqlServerLogRefreshTimer?.Dispose();
+
+            // 创建新的定时器
+            var refreshInterval = config?.SqlServerMonitoring?.UIRefreshIntervalSeconds ?? 10;
+            sqlServerLogRefreshTimer = new System.Threading.Timer(_ => AutoRefreshSQLServerLogs(), null, TimeSpan.FromSeconds(refreshInterval), TimeSpan.FromSeconds(refreshInterval));
+
+            // 更新状态显示
+            UpdateAutoRefreshStatusDisplay();
+        }
+
+        /// <summary>
+        /// 更新自动刷新状态显示
+        /// </summary>
+        private void UpdateAutoRefreshStatusDisplay()
+        {
+            if (lblAutoRefreshStatus.InvokeRequired)
+            {
+                lblAutoRefreshStatus.Invoke(new Action(UpdateAutoRefreshStatusDisplay));
+                return;
+            }
+
+            var refreshInterval = config?.SqlServerMonitoring?.UIRefreshIntervalSeconds ?? 10;
+            lblAutoRefreshStatus.Text = $"自动刷新: 每{refreshInterval}秒";
+            lblAutoRefreshStatus.ForeColor = isSQLServerMonitoring ? Color.Green : Color.Gray;
         }
 
         #region SQL Server 监控事件处理
@@ -123,6 +159,9 @@ namespace WindowsEventLogMonitor
                 lblMonitorStatus.Text = "状态: 正在启动...";
                 lblMonitorStatus.ForeColor = Color.Orange;
 
+                // 更新自动刷新状态显示
+                UpdateAutoRefreshStatusDisplay();
+
                 // 异步启动监控，不阻塞UI线程
                 StartSQLServerMonitoringAsync();
 
@@ -135,6 +174,9 @@ namespace WindowsEventLogMonitor
                 btnStopSQLServerMonitoring.Enabled = false;
                 lblMonitorStatus.Text = "状态: 启动失败";
                 lblMonitorStatus.ForeColor = Color.Red;
+
+                // 更新自动刷新状态显示
+                UpdateAutoRefreshStatusDisplay();
 
                 MessageBox.Show($"启动SQL Server监控失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 AddError("SQL Server监控启动失败", ex.Message);
@@ -383,6 +425,37 @@ namespace WindowsEventLogMonitor
             {
                 AddError("更新SQL Server日志显示失败", ex.Message);
                 LogMessage($"更新日志显示失败: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 自动刷新SQL Server日志显示
+        /// </summary>
+        private async void AutoRefreshSQLServerLogs()
+        {
+            // 只有在SQL Server监控启动时才自动刷新
+            if (!isSQLServerMonitoring)
+                return;
+
+            try
+            {
+                // 在UI线程上更新显示
+                if (this.InvokeRequired)
+                {
+                    this.Invoke(new Action(() =>
+                    {
+                        Task.Run(async () => await UpdateSQLServerLogDisplay());
+                    }));
+                    return;
+                }
+
+                // 更新显示（不收集新日志，只更新UI显示）
+                await UpdateSQLServerLogDisplay();
+            }
+            catch (Exception ex)
+            {
+                // 静默处理错误，避免影响用户体验
+                LogMessage($"自动刷新日志显示时发生错误: {ex.Message}");
             }
         }
 
@@ -940,6 +1013,9 @@ namespace WindowsEventLogMonitor
                             lblMonitorStatus.Text = "状态: 已停止";
                             lblMonitorStatus.ForeColor = Color.Red;
                             LogMessage("SQL Server监控已停止");
+
+                            // 更新自动刷新状态显示
+                            UpdateAutoRefreshStatusDisplay();
                         }));
 
                         // 清理资源
@@ -1133,6 +1209,7 @@ namespace WindowsEventLogMonitor
             // 清理定时器
             logCleanTimer?.Dispose();
             statusUpdateTimer?.Dispose();
+            sqlServerLogRefreshTimer?.Dispose();
 
             // 清理监控资源
             sqlServerMonitoringCancellationTokenSource?.Dispose();

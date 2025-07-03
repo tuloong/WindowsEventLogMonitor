@@ -42,6 +42,7 @@
         private DataGridView dataGridViewSQLServerLogs;
         private Label lblMonitorStatus;
         private Label lblLogCount;
+        private Label lblAutoRefreshStatus;
 
         // 通用日志监控页面控件
         private ComboBox comboBoxEventSource;
@@ -199,7 +200,7 @@
             var configPanel = new TableLayoutPanel();
             configPanel.Dock = DockStyle.Fill;
             configPanel.ColumnCount = 5;
-            configPanel.RowCount = 4;
+            configPanel.RowCount = 5;
             configPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20F));
             configPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20F));
             configPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 20F));
@@ -208,6 +209,7 @@
             configPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 35F)); // 增加行高
             configPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 35F));
             configPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 45F)); // 按钮行更高
+            configPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 30F)); // 状态行
             configPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             configPanel.Padding = new Padding(5); // 配置面板内边距
 
@@ -323,6 +325,17 @@
             lblLogCount.Font = new Font("微软雅黑", 9F);
             lblLogCount.Margin = new Padding(3, 8, 3, 8);
             configPanel.Controls.Add(lblLogCount, 4, 2);
+
+            // 第四行 - 自动刷新状态
+            lblAutoRefreshStatus = new Label();
+            lblAutoRefreshStatus.Text = "自动刷新: 每10秒";
+            lblAutoRefreshStatus.Dock = DockStyle.Fill;
+            lblAutoRefreshStatus.TextAlign = ContentAlignment.MiddleLeft;
+            lblAutoRefreshStatus.Font = new Font("微软雅黑", 8F);
+            lblAutoRefreshStatus.ForeColor = Color.Blue;
+            lblAutoRefreshStatus.Margin = new Padding(3, 3, 3, 3);
+            configPanel.Controls.Add(lblAutoRefreshStatus, 0, 3);
+            configPanel.SetColumnSpan(lblAutoRefreshStatus, 5); // 跨越所有列
 
             groupBoxSQLServerMonitoring.Controls.Add(configPanel);
 

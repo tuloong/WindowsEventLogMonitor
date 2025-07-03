@@ -204,7 +204,8 @@ public class SqlServerLogMonitor
             Console.WriteLine($"更新最后处理时间为: {processingStartTime:yyyy-MM-dd HH:mm:ss}");
 
             // 第四步：推送日志
-            bool pushSuccess = await ProcessLogsInBatchesAsync(sqlServerLogs, apiUrl, batchSize: 10);
+            var config = Config.GetCachedConfig() ?? new Config();
+            bool pushSuccess = await ProcessLogsInBatchesAsync(sqlServerLogs, apiUrl, batchSize: config.SqlServerMonitoring.BatchSize);
 
             if (pushSuccess)
             {
@@ -333,7 +334,7 @@ public class SqlServerLogMonitor
         for (int i = 0; i < logs.Count; i += batchSize)
         {
             var batch = logs.Skip(i).Take(batchSize).ToList();
-            var json = JsonConvert.SerializeObject(batch, Formatting.Indented);
+            var json = JsonConvert.SerializeObject(batch, Formatting.None);
 
             try
             {

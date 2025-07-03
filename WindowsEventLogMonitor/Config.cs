@@ -60,6 +60,7 @@ public class SqlServerMonitoringConfig
 {
     public bool Enabled { get; set; } = true;
     public int MonitorIntervalSeconds { get; set; } = 30;
+    public int UIRefreshIntervalSeconds { get; set; } = 10;
     public int BatchSize { get; set; } = 10;
     public bool IncludeMSSQLSERVER { get; set; } = true;
     public bool IncludeWindowsAuth { get; set; } = true;

@@ -361,3 +361,28 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# ============================================
+# Project-specific patterns
+# ============================================
+
+# Worktrees directory (git worktree isolation)
+.worktrees/
+worktrees/
+
+# Setup/Installer files
+*-Setup.exe
+*-Installer.exe
+
+# .NET publish output (custom publish directories)
+**/binRelease*/
+**/binDebug*/
+**/publish*/
+
+# Design/Planning docs (keep in repo, but ignore if needed)
+# docs/plans/*.md
+
+# Application logs (if any generated at runtime)
+**/sql_server_push_log*.ini
+**/push_log*.ini
+*.backup_*

@@ -193,7 +193,9 @@ public static class ServiceInstaller
     {
         try
         {
-            var exePath = System.Reflection.Assembly.GetExecutingAssembly().Location;
+            // 使用进程主模块路径获取 .exe 路径，而不是 .dll
+            var exePath = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName
+                ?? System.Reflection.Assembly.GetExecutingAssembly().Location.Replace(".dll", ".exe");
             var installCommand = $"sc create SqlServerLogMonitor binPath= \"{exePath}\" start= auto";
 
             var processInfo = new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c {installCommand}")

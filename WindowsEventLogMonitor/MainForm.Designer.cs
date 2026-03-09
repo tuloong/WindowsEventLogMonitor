@@ -92,6 +92,12 @@
         private NotifyIcon notifyIcon;
         private ContextMenuStrip contextMenuStrip;
 
+        // 自启动控件
+        private CheckBox checkBoxEnableAutoStart;
+        private RadioButton radioButtonGuiMode;
+        private CheckBox checkBoxMinimizeToTray;
+        private RadioButton radioButtonServiceMode;
+
         /// <summary>
         ///  Required method for Designer support - do not modify
         ///  the contents of this method with the code editor.
@@ -116,6 +122,7 @@
             InitializeSQLServerTab();
             InitializeGeneralLogsTab();
             InitializeConfigurationTab();
+            InitializeAutoStartControls();
             InitializeServiceTab();
             InitializeStatusTab();
 
@@ -1052,6 +1059,75 @@
             mainPanel.Controls.Add(statusPanel, 0, 2);
 
             tabPageStatus.Controls.Add(mainPanel);
+        }
+
+        private void InitializeAutoStartControls()
+        {
+            // 自启动设置分组框
+            var groupBoxAutoStart = new GroupBox
+            {
+                Text = "自启动设置",
+                Location = new Point(20, 400),
+                Size = new Size(600, 150)
+            };
+
+            // 启用自启动复选框
+            checkBoxEnableAutoStart = new CheckBox
+            {
+                Text = "开机自动启动",
+                Location = new Point(20, 30),
+                AutoSize = true
+            };
+            checkBoxEnableAutoStart.CheckedChanged += CheckBoxEnableAutoStart_CheckedChanged;
+
+            // GUI 模式单选按钮
+            radioButtonGuiMode = new RadioButton
+            {
+                Text = "以图形界面模式启动",
+                Location = new Point(40, 55),
+                AutoSize = true,
+                Enabled = false
+            };
+            radioButtonGuiMode.CheckedChanged += RadioButtonGuiMode_CheckedChanged;
+
+            // 最小化到托盘复选框
+            checkBoxMinimizeToTray = new CheckBox
+            {
+                Text = "启动时最小化到系统托盘",
+                Location = new Point(60, 80),
+                AutoSize = true,
+                Enabled = false
+            };
+
+            // 服务模式单选按钮
+            radioButtonServiceMode = new RadioButton
+            {
+                Text = "以服务模式启动",
+                Location = new Point(40, 105),
+                AutoSize = true,
+                Enabled = false
+            };
+
+            // 服务模式提示标签
+            var lblServiceHint = new Label
+            {
+                Text = "（需先安装 Windows 服务）",
+                Location = new Point(160, 107),
+                AutoSize = true,
+                ForeColor = Color.Gray,
+                Font = new Font(this.Font.FontFamily, 8)
+            };
+
+            groupBoxAutoStart.Controls.AddRange(new Control[]
+            {
+                checkBoxEnableAutoStart,
+                radioButtonGuiMode,
+                checkBoxMinimizeToTray,
+                radioButtonServiceMode,
+                lblServiceHint
+            });
+
+            tabPageConfiguration.Controls.Add(groupBoxAutoStart);
         }
 
         #endregion

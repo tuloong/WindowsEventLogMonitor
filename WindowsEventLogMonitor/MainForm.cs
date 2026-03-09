@@ -1224,6 +1224,20 @@ namespace WindowsEventLogMonitor
         }
 
         #endregion
+
+        #region 自启动设置事件处理
+
+        private void CheckBoxEnableAutoStart_CheckedChanged(object sender, EventArgs e)
+        {
+            // Task 9: 实现自启动启用/禁用逻辑
+        }
+
+        private void RadioButtonGuiMode_CheckedChanged(object sender, EventArgs e)
+        {
+            // Task 9: 实现GUI模式切换逻辑
+        }
+
+        #endregion
     }
 
     public class ErrorInfo

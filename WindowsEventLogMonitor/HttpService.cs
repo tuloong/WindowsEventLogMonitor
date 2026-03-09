@@ -4,13 +4,14 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.Net.Http;
-using System.Threading.Tasks;
 
 namespace WindowsEventLogMonitor;
 
 internal class HttpService
 {
     private static readonly HttpClient client = new HttpClient();
+    private static readonly object initLock = new object();
+    private static bool isInitialized = false;
     private readonly Config config;
 
     public HttpService()
@@ -21,17 +22,40 @@ internal class HttpService
 
     private void ConfigureHttpClient()
     {
-        // 设置超时
-        client.Timeout = TimeSpan.FromSeconds(config.Security.TimeoutSeconds);
-
-        // 设置API密钥
-        if (!string.IsNullOrEmpty(config.Security.ApiKey))
+        if (isInitialized)
         {
-            client.DefaultRequestHeaders.Add("Authorization", $"Bearer {config.Security.ApiKey}");
+            return;
         }
 
-        // 设置用户代理
-        client.DefaultRequestHeaders.Add("User-Agent", "WindowsEventLogMonitor/1.0");
+        lock (initLock)
+        {
+            if (isInitialized)
+            {
+                return;
+            }
+
+            // 设置超时
+            client.Timeout = TimeSpan.FromSeconds(config.Security.TimeoutSeconds);
+
+            // 设置API密钥 - 先移除可能存在的旧值再添加
+            if (!string.IsNullOrEmpty(config.Security.ApiKey))
+            {
+                if (client.DefaultRequestHeaders.Contains("Authorization"))
+                {
+                    client.DefaultRequestHeaders.Remove("Authorization");
+                }
+                client.DefaultRequestHeaders.Add("Authorization", $"Bearer {config.Security.ApiKey}");
+            }
+
+            // 设置用户代理 - 先移除可能存在的旧值再添加
+            if (client.DefaultRequestHeaders.Contains("User-Agent"))
+            {
+                client.DefaultRequestHeaders.Remove("User-Agent");
+            }
+            client.DefaultRequestHeaders.Add("User-Agent", "WindowsEventLogMonitor/1.0");
+
+            isInitialized = true;
+        }
     }
 
     public async Task PushLogsToAPIAsync(string jsonData, string apiUrl)
@@ -157,8 +181,4 @@ internal class HttpService
         }
     }
 
-    public void Dispose()
-    {
-        client?.Dispose();
-    }
 }

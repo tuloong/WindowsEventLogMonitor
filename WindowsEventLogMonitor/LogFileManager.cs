@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Collections.Generic;
+using System.Diagnostics;
 
 namespace WindowsEventLogMonitor
 {
@@ -103,9 +104,10 @@ namespace WindowsEventLogMonitor
                 // 仍然检查旧的日志文件格式（兼容性）
                 CheckLegacyLogFiles(logType, pushedLogIds);
             }
-            catch
+            catch (Exception ex)
             {
-                // 忽略异常
+                // 记录调试信息以便诊断问题
+                Debug.WriteLine($"[LogFileManager] 加载推送日志ID时发生异常: {ex.Message}");
             }
 
             return pushedLogIds;
@@ -128,9 +130,10 @@ namespace WindowsEventLogMonitor
                 // 由于已禁用.ini文件记录，只检查旧格式文件
                 CheckLegacyTimeFiles(logType, ref maxProcessedTime, pattern);
             }
-            catch
+            catch (Exception ex)
             {
-                // 忽略异常
+                // 记录调试信息以便诊断问题
+                Debug.WriteLine($"[LogFileManager] 获取最后处理时间时发生异常: {ex.Message}");
             }
 
             return maxProcessedTime;
@@ -147,9 +150,10 @@ namespace WindowsEventLogMonitor
                 // 只清理旧的单一日志文件（兼容性）
                 CleanupLegacyLogFiles();
             }
-            catch
+            catch (Exception ex)
             {
-                // 忽略异常
+                // 记录调试信息以便诊断问题
+                Debug.WriteLine($"[LogFileManager] 清理旧日志文件时发生异常: {ex.Message}");
             }
         }
 
@@ -218,9 +222,10 @@ namespace WindowsEventLogMonitor
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // 忽略解析错误的行
+                // 记录调试信息以便诊断问题
+                Debug.WriteLine($"[LogFileManager] 解析日志ID时发生异常: {ex.Message}");
             }
         }
 
@@ -240,9 +245,10 @@ namespace WindowsEventLogMonitor
                         ExtractLogIdFromLine(line, pushedLogIds);
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // 忽略旧文件读取错误
+                    // 记录调试信息以便诊断问题
+                    Debug.WriteLine($"[LogFileManager] 读取旧格式日志文件时发生异常: {ex.Message}");
                 }
             }
         }
@@ -273,9 +279,10 @@ namespace WindowsEventLogMonitor
                         }
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // 忽略旧文件读取错误
+                    // 记录调试信息以便诊断问题
+                    Debug.WriteLine($"[LogFileManager] 读取旧格式时间文件时发生异常: {ex.Message}");
                 }
             }
         }

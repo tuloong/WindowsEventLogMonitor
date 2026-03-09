@@ -7,13 +7,40 @@ using System.Threading.Tasks;
 
 namespace WindowsEventLogMonitor;
 
-internal class EventLogReader
+internal class EventLogReader : IDisposable
 {
     private readonly EventLog eventLog;
+    private bool disposed = false;
 
     public EventLogReader(string logName)
     {
         eventLog = new EventLog(logName);
+    }
+
+    /// <summary>
+    /// 释放 EventLog 资源
+    /// </summary>
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (!disposed)
+        {
+            if (disposing)
+            {
+                eventLog?.Dispose();
+            }
+            disposed = true;
+        }
+    }
+
+    ~EventLogReader()
+    {
+        Dispose(false);
     }
 
     /// <summary>

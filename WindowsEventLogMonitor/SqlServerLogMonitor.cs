@@ -11,12 +11,13 @@ namespace WindowsEventLogMonitor;
 /// <summary>
 /// SQL Server 日志监控器 - 专门用于收集和上传SQL Server登录相关的日志
 /// </summary>
-public class SqlServerLogMonitor
+public class SqlServerLogMonitor : IDisposable
 {
     private readonly EventLogReader applicationLogReader;
     private readonly EventLogReader securityLogReader;
     private readonly HttpService httpService;
     private bool isMonitoring = false;
+    private bool disposed = false;
 
     // 缓存最新收集的日志，供UI显示使用
     private readonly List<SqlServerLogEntry> recentLogs = new List<SqlServerLogEntry>();
@@ -72,6 +73,28 @@ public class SqlServerLogMonitor
     public void StopMonitoring()
     {
         isMonitoring = false;
+    }
+
+    /// <summary>
+    /// 释放资源
+    /// </summary>
+    public void Dispose()
+    {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    protected virtual void Dispose(bool disposing)
+    {
+        if (!disposed)
+        {
+            if (disposing)
+            {
+                applicationLogReader?.Dispose();
+                securityLogReader?.Dispose();
+            }
+            disposed = true;
+        }
     }
 
     /// <summary>
@@ -245,7 +268,7 @@ public class SqlServerLogMonitor
         {
             try
             {
-                var eventLogReader = new EventLogReader("Application");
+                using var eventLogReader = new EventLogReader("Application");
                 var allMssqlLogs = eventLogReader.FilterEventLogEntries("MSSQLSERVER", string.Empty);
 
                 var mssqlLogs = allMssqlLogs
@@ -479,8 +502,13 @@ public class SqlServerLogMonitor
     {
         lock (recentLogsLock)
         {
+            // 先限制新日志数量，避免一次性插入过多导致内存压力
+            var trimmedNewLogs = newLogs.OrderByDescending(log => log.TimeGenerated)
+                .Take(200)
+                .ToList();
+
             // 将新日志添加到缓存前面（最新的在前面）
-            recentLogs.InsertRange(0, newLogs.OrderByDescending(log => log.TimeGenerated));
+            recentLogs.InsertRange(0, trimmedNewLogs);
 
             // 只保留最近200条日志，避免内存过大
             if (recentLogs.Count > 200)

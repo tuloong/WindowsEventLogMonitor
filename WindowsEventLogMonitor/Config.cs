@@ -10,7 +10,7 @@ namespace WindowsEventLogMonitor;
 
 internal class Config
 {
-    public string ApiUrl { get; set; } = "http://localhost:5000/api/aa/WindowsEventMonitor/SaveEventLog";
+    public string ApiUrl { get; set; } = "https://localhost:5000/api/aa/WindowsEventMonitor/SaveEventLog";
     public SqlServerMonitoringConfig SqlServerMonitoring { get; set; } = new();
     public RetryPolicyConfig RetryPolicy { get; set; } = new();
     public LogRetentionConfig LogRetention { get; set; } = new();
@@ -90,7 +90,7 @@ public class LogRetentionConfig
 
 public class SecurityConfig
 {
-    public bool UseHttps { get; set; } = false;
+    public bool UseHttps { get; set; } = true;
     public string ApiKey { get; set; } = "";
     public int TimeoutSeconds { get; set; } = 30;
 }

@@ -120,9 +120,109 @@ namespace WindowsEventLogMonitor.Services
             }
         }
 
+        public bool EnableServiceAutoStart()
+        {
+            try
+            {
+                // 检查服务是否已安装
+                if (!IsServiceInstalled())
+                {
+                    System.Diagnostics.Debug.WriteLine("[AutoStartService] 服务未安装");
+                    return false;
+                }
+
+                // 先禁用 GUI 自启动
+                DisableGuiAutoStart();
+
+                // 设置服务启动类型为自动
+                var startInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "sc.exe",
+                    Arguments = "config SqlServerLogMonitor start= auto",
+                    Verb = "runas", // 请求提升权限
+                    UseShellExecute = true,
+                    CreateNoWindow = true
+                };
+
+                try
+                {
+                    var process = System.Diagnostics.Process.Start(startInfo);
+                    process?.WaitForExit(5000);
+                }
+                catch (System.ComponentModel.Win32Exception)
+                {
+                    // 用户取消 UAC 提示
+                    System.Diagnostics.Debug.WriteLine("[AutoStartService] 用户取消权限提升");
+                    return false;
+                }
+
+                // 更新配置
+                var config = Config.GetCachedConfig() ?? new Config();
+                config.AutoStart.Enabled = true;
+                config.AutoStart.Mode = AutoStartMode.Service;
+                Config.SaveConfig(config);
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[AutoStartService] 启用服务自启动失败: {ex.Message}");
+                return false;
+            }
+        }
+
+        private bool IsServiceInstalled()
+        {
+            try
+            {
+                using var service = new ServiceController("SqlServerLogMonitor");
+                var status = service.Status;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void DisableGuiAutoStart()
+        {
+            try
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(RegistryKeyPath, true);
+                if (key != null && key.GetValue(AppName) != null)
+                {
+                    key.DeleteValue(AppName);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[AutoStartService] 禁用 GUI 自启动失败: {ex.Message}");
+            }
+        }
+
         private void DisableServiceAutoStart()
         {
-            // Task 6 将实现
+            try
+            {
+                if (!IsServiceInstalled()) return;
+
+                var startInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "sc.exe",
+                    Arguments = "config SqlServerLogMonitor start= demand",
+                    Verb = "runas",
+                    UseShellExecute = true,
+                    CreateNoWindow = true
+                };
+
+                var process = System.Diagnostics.Process.Start(startInfo);
+                process?.WaitForExit(5000);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[AutoStartService] 禁用服务自启动失败: {ex.Message}");
+            }
         }
     }
 }

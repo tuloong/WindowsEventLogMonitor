@@ -16,6 +16,7 @@ public class SqlServerLogMonitor : IDisposable
     private readonly EventLogReader applicationLogReader;
     private readonly EventLogReader securityLogReader;
     private readonly HttpService httpService;
+    private readonly InMemoryDeduplicationStore _dedupStore;
     private bool isMonitoring = false;
     private bool disposed = false;
 
@@ -33,6 +34,7 @@ public class SqlServerLogMonitor : IDisposable
         applicationLogReader = new EventLogReader("Application");
         securityLogReader = new EventLogReader("Security");
         httpService = new HttpService();
+        _dedupStore = new InMemoryDeduplicationStore();
 
         // 初始化启动时间
         lock (startupTimeLock)
@@ -214,7 +216,7 @@ public class SqlServerLogMonitor : IDisposable
 
         if (sqlServerLogs.Count > 0)
         {
-            Console.WriteLine($"收集到 {sqlServerLogs.Count} 条新的SQL Server日志");
+            Console.WriteLine($"收集到 {sqlServerLogs.Count} 条新的SQL Server日志 (已去重存储: {_dedupStore.Count} 条)");
 
             // 第二步：加载完记录的日志 - 更新缓存供UI显示
             UpdateRecentLogsCache(sqlServerLogs);
@@ -279,9 +281,18 @@ public class SqlServerLogMonitor : IDisposable
 
                 foreach (var log in mssqlLogs)
                 {
+                    var uniqueKey = GenerateUniqueKey(log);
+
+                    // Skip if already pushed in this session
+                    if (_dedupStore.Contains(uniqueKey))
+                    {
+                        Console.WriteLine($"Skipping duplicate log: {uniqueKey}");
+                        continue;
+                    }
+
                     newLogs.Add(new SqlServerLogEntry
                     {
-                        UniqueKey = GenerateUniqueKey(log),
+                        UniqueKey = uniqueKey,
                         TimeGenerated = log.TimeGenerated,
                         EventId = (int)log.InstanceId,
                         Source = log.Source,
@@ -318,9 +329,18 @@ public class SqlServerLogMonitor : IDisposable
 
                     foreach (var log in authLogs)
                     {
+                        var uniqueKey = GenerateUniqueKey(log);
+
+                        // Skip if already pushed in this session
+                        if (_dedupStore.Contains(uniqueKey))
+                        {
+                            Console.WriteLine($"Skipping duplicate log: {uniqueKey}");
+                            continue;
+                        }
+
                         newLogs.Add(new SqlServerLogEntry
                         {
-                            UniqueKey = GenerateUniqueKey(log),
+                            UniqueKey = uniqueKey,
                             TimeGenerated = log.TimeGenerated,
                             EventId = (int)log.InstanceId,
                             Source = log.Source,
@@ -363,6 +383,12 @@ public class SqlServerLogMonitor : IDisposable
             {
                 await httpService.PushLogsToAPIAsync(json, apiUrl);
                 Console.WriteLine($"成功推送 {batch.Count} 条SQL Server日志");
+
+                // Track successfully pushed logs
+                foreach (var log in batch)
+                {
+                    _dedupStore.TryAdd(log.UniqueKey);
+                }
             }
             catch (Exception ex)
             {

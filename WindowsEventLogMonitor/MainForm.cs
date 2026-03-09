@@ -1430,13 +1430,14 @@ namespace WindowsEventLogMonitor
 
             if (enabled)
             {
-                checkBoxMinimizeToTray.Enabled = radioButtonGuiMode.Checked;
-
-                // 默认选中 GUI 模式
+                // 默认选中 GUI 模式（如果没有选中任何模式）
                 if (!radioButtonGuiMode.Checked && !radioButtonServiceMode.Checked)
                 {
                     radioButtonGuiMode.Checked = true;
                 }
+
+                // 根据 GUI 模式是否选中来决定最小化复选框的可用性
+                checkBoxMinimizeToTray.Enabled = radioButtonGuiMode.Checked;
             }
             else
             {

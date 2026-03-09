@@ -1039,6 +1039,29 @@ namespace WindowsEventLogMonitor
             }
         }
 
+        /// <summary>
+        /// 自启动时自动开始监控
+        /// </summary>
+        public void StartAutoMonitoring()
+        {
+            // 如果配置启用了 SQL Server 监控，自动开始
+            if (config.SqlServerMonitoring.Enabled && !isSQLServerMonitoring)
+            {
+                BeginInvoke(new Action(() =>
+                {
+                    try
+                    {
+                        StartSQLServerMonitoringAsync();
+                        System.Diagnostics.Debug.WriteLine("[MainForm] 自启动监控已自动开始");
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[MainForm] 自启动监控启动失败: {ex.Message}");
+                    }
+                }));
+            }
+        }
+
         private void StopSQLServerMonitoring()
         {
             try

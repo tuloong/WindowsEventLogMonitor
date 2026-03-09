@@ -145,7 +145,7 @@ namespace WindowsEventLogMonitor
                 {
                     form.Hide();
                     // 触发 SQL Server 监控自动启动（如果配置启用）
-                    // form.StartAutoMonitoring(); // Task 11 中实现
+                    form.StartAutoMonitoring();
                 }));
             }
 

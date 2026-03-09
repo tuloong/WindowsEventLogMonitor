@@ -736,7 +736,7 @@ namespace WindowsEventLogMonitor
             }
         }
 
-        private void BtnStartService_Click(object sender, EventArgs e)
+        private async void BtnStartService_Click(object sender, EventArgs e)
         {
             try
             {
@@ -762,42 +762,59 @@ namespace WindowsEventLogMonitor
                     return;
                 }
 
-                using (var service = new ServiceController("SqlServerLogMonitor"))
+                // 禁用按钮防止重复点击
+                btnStartService.Enabled = false;
+                LogMessage("正在启动服务...");
+
+                await Task.Run(() =>
                 {
-                    switch (service.Status)
+                    using (var service = new ServiceController("SqlServerLogMonitor"))
                     {
-                        case ServiceControllerStatus.Running:
-                            LogMessage("服务已在运行中");
-                            MessageBox.Show("服务已在运行中", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                            break;
+                        switch (service.Status)
+                        {
+                            case ServiceControllerStatus.Running:
+                                BeginInvoke(new Action(() =>
+                                {
+                                    LogMessage("服务已在运行中");
+                                    MessageBox.Show("服务已在运行中", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                                }));
+                                break;
 
-                        case ServiceControllerStatus.StartPending:
-                            LogMessage("服务正在启动中，请稍候...");
-                            service.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(30));
-                            LogMessage("服务已启动");
-                            break;
+                            case ServiceControllerStatus.StartPending:
+                                BeginInvoke(new Action(() => LogMessage("服务正在启动中，请稍候...")));
+                                service.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(30));
+                                BeginInvoke(new Action(() => LogMessage("服务已启动")));
+                                break;
 
-                        case ServiceControllerStatus.Stopped:
-                        case ServiceControllerStatus.StopPending:
-                            if (service.Status == ServiceControllerStatus.StopPending)
-                            {
-                                LogMessage("等待服务停止完成...");
-                                service.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(30));
-                            }
+                            case ServiceControllerStatus.Stopped:
+                            case ServiceControllerStatus.StopPending:
+                                if (service.Status == ServiceControllerStatus.StopPending)
+                                {
+                                    BeginInvoke(new Action(() => LogMessage("等待服务停止完成...")));
+                                    service.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(30));
+                                }
 
-                            LogMessage("正在启动服务...");
-                            service.Start();
-                            service.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(30));
-                            LogMessage("服务已成功启动");
-                            MessageBox.Show("服务已成功启动", "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                            break;
+                                BeginInvoke(new Action(() => LogMessage("正在启动服务...")));
+                                service.Start();
+                                service.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(30));
+                                BeginInvoke(new Action(() =>
+                                {
+                                    LogMessage("服务已成功启动");
+                                    MessageBox.Show("服务已成功启动", "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                                }));
+                                break;
 
-                        default:
-                            LogMessage($"服务状态: {service.Status}");
-                            MessageBox.Show($"服务当前状态: {service.Status}\n无法启动服务", "警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                            break;
+                            default:
+                                BeginInvoke(new Action(() =>
+                                {
+                                    LogMessage($"服务状态: {service.Status}");
+                                    MessageBox.Show($"服务当前状态: {service.Status}\n无法启动服务", "警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                                }));
+                                break;
+                        }
                     }
-                }
+                });
+
                 UpdateServiceStatus();
             }
             catch (System.ServiceProcess.TimeoutException)
@@ -841,27 +858,47 @@ namespace WindowsEventLogMonitor
                     AddError("启动服务失败", ex.Message);
                 }
             }
+            finally
+            {
+                // 重新启用按钮
+                btnStartService.Enabled = true;
+            }
         }
 
-        private void BtnStopService_Click(object sender, EventArgs e)
+        private async void BtnStopService_Click(object sender, EventArgs e)
         {
             try
             {
-                using (var service = new ServiceController("SqlServerLogMonitor"))
+                btnStopService.Enabled = false;
+                LogMessage("正在停止服务...");
+
+                await Task.Run(() =>
                 {
-                    if (service.Status != ServiceControllerStatus.Stopped)
+                    using (var service = new ServiceController("SqlServerLogMonitor"))
                     {
-                        service.Stop();
-                        service.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(30));
-                        LogMessage("服务已停止");
+                        if (service.Status != ServiceControllerStatus.Stopped)
+                        {
+                            service.Stop();
+                            service.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(30));
+                            BeginInvoke(new Action(() => LogMessage("服务已停止")));
+                        }
+                        else
+                        {
+                            BeginInvoke(new Action(() => LogMessage("服务已经处于停止状态")));
+                        }
                     }
-                }
+                });
+
                 UpdateServiceStatus();
             }
             catch (Exception ex)
             {
                 MessageBox.Show($"停止服务失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 AddError("停止服务失败", ex.Message);
+            }
+            finally
+            {
+                btnStopService.Enabled = true;
             }
         }
 

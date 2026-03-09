@@ -768,6 +768,24 @@ namespace WindowsEventLogMonitor
 
                 await Task.Run(() =>
                 {
+                    // 首先尝试启用服务（解决服务被禁用的情况）
+                    try
+                    {
+                        using (var service = new ServiceController("SqlServerLogMonitor"))
+                        {
+                            // 如果服务被禁用，尝试启用它
+                            if (service.StartType == ServiceStartMode.Disabled)
+                            {
+                                BeginInvoke(new Action(() => LogMessage("服务被禁用，正在启用...")));
+                                EnableService();
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        BeginInvoke(new Action(() => LogMessage($"检查/启用服务状态失败: {ex.Message}")));
+                    }
+
                     using (var service = new ServiceController("SqlServerLogMonitor"))
                     {
                         switch (service.Status)
@@ -862,6 +880,40 @@ namespace WindowsEventLogMonitor
             {
                 // 重新启用按钮
                 btnStartService.Enabled = true;
+            }
+        }
+
+        /// <summary>
+        /// 启用被禁用的服务
+        /// </summary>
+        private void EnableService()
+        {
+            try
+            {
+                var startInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "sc.exe",
+                    Arguments = "config SqlServerLogMonitor start= auto",
+                    Verb = "runas",
+                    UseShellExecute = true,
+                    CreateNoWindow = true
+                };
+
+                var process = System.Diagnostics.Process.Start(startInfo);
+                process?.WaitForExit(5000);
+
+                if (process?.ExitCode == 0)
+                {
+                    BeginInvoke(new Action(() => LogMessage("服务已启用")));
+                }
+                else
+                {
+                    BeginInvoke(new Action(() => LogMessage("启用服务失败，可能需要管理员权限")));
+                }
+            }
+            catch (Exception ex)
+            {
+                BeginInvoke(new Action(() => LogMessage($"启用服务时出错: {ex.Message}")));
             }
         }
 

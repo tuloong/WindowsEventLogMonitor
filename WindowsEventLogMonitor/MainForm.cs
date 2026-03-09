@@ -818,13 +818,28 @@ namespace WindowsEventLogMonitor
             }
             catch (Exception ex)
             {
-                var message = $"启动服务失败: {ex.Message}\n\n" +
-                            "可能的解决方案：\n" +
-                            "1. 确保服务已正确安装\n" +
-                            "2. 检查配置文件是否正确\n" +
-                            "3. 以管理员身份运行程序";
-                MessageBox.Show(message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                AddError("启动服务失败", ex.Message);
+                // 检查是否是权限相关错误
+                if (ex.Message.Contains("Cannot open") || ex.Message.Contains("拒绝访问") || ex.Message.Contains("Access is denied"))
+                {
+                    var permissionMessage = "权限不足，无法访问服务。\n\n" +
+                        "请以管理员身份运行此程序：\n" +
+                        "1. 右键点击程序图标\n" +
+                        "2. 选择'以管理员身份运行'\n\n" +
+                        "或者使用命令行启动服务：\n" +
+                        "net start SqlServerLogMonitor";
+                    MessageBox.Show(permissionMessage, "权限错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    AddError("启动服务失败", "权限不足 - 需要管理员身份运行");
+                }
+                else
+                {
+                    var message = $"启动服务失败: {ex.Message}\n\n" +
+                                "可能的解决方案：\n" +
+                                "1. 确保服务已正确安装\n" +
+                                "2. 检查配置文件是否正确\n" +
+                                "3. 以管理员身份运行程序";
+                    MessageBox.Show(message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    AddError("启动服务失败", ex.Message);
+                }
             }
         }
 

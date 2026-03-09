@@ -1,6 +1,5 @@
 using System;
 using System.Linq;
-using System.ServiceProcess;
 using System.Windows.Forms;
 
 namespace WindowsEventLogMonitor
@@ -20,20 +19,8 @@ namespace WindowsEventLogMonitor
 
                 switch (command)
                 {
-                    case "install":
-                        ServiceInstaller.InstallService();
-                        return;
-
-                    case "uninstall":
-                        ServiceInstaller.UninstallService();
-                        return;
-
                     case "console":
                         RunAsConsole();
-                        return;
-
-                    case "service":
-                        RunAsService();
                         return;
 
                     case "test-logid":
@@ -73,7 +60,7 @@ namespace WindowsEventLogMonitor
                         }
                         else
                         {
-                            Console.WriteLine("用法: WindowsEventLogMonitor.exe set-autostart-mode gui|service [--minimize]");
+                            Console.WriteLine("用法: WindowsEventLogMonitor.exe set-autostart-mode gui [--minimize]");
                         }
                         return;
 
@@ -136,17 +123,17 @@ namespace WindowsEventLogMonitor
 
             if (minimizeToTray)
             {
-                // 隐藏窗口，只显示托盘图标
+                // 设置窗口初始状态为最小化
                 form.WindowState = FormWindowState.Minimized;
                 form.ShowInTaskbar = false;
 
-                // 使用 BeginInvoke 在窗体加载后最小化到托盘
-                form.BeginInvoke(new Action(() =>
+                // 使用 Load 事件在窗体句柄创建后执行隐藏操作
+                form.Load += (sender, e) =>
                 {
                     form.Hide();
                     // 触发 SQL Server 监控自动启动（如果配置启用）
                     form.StartAutoMonitoring();
-                }));
+                };
             }
 
             Application.Run(form);
@@ -158,47 +145,19 @@ namespace WindowsEventLogMonitor
         private static void SetAutoStartMode(string mode, bool minimizeToTray)
         {
             var service = new Services.AutoStartService();
-            bool success;
 
             switch (mode)
             {
                 case "gui":
-                    success = service.EnableGuiAutoStart(minimizeToTray);
+                    var success = service.EnableGuiAutoStart(minimizeToTray);
                     Console.WriteLine(success
-                        ? $"GUI 模式自启动已启用{(minimizeToTray ? "（最小化到托盘）" : "")}"
-                        : "GUI 模式自启动启用失败");
-                    break;
-
-                case "service":
-                    success = service.EnableServiceAutoStart();
-                    Console.WriteLine(success
-                        ? "服务模式自启动已启用"
-                        : "服务模式自启动启用失败（请确认服务已安装）");
+                        ? $"自启动已启用{(minimizeToTray ? "（最小化到托盘）" : "")}"
+                        : "自启动启用失败");
                     break;
 
                 default:
-                    Console.WriteLine("无效的模式。可用模式: gui, service");
+                    Console.WriteLine("用法: WindowsEventLogMonitor.exe set-autostart-mode [--minimize]");
                     break;
-            }
-        }
-
-        /// <summary>
-        /// 以Windows服务模式运行
-        /// </summary>
-        private static void RunAsService()
-        {
-            try
-            {
-                var servicesToRun = new ServiceBase[]
-                {
-                    new SqlServerLogService()
-                };
-
-                ServiceBase.Run(servicesToRun);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"服务运行失败: {ex.Message}");
             }
         }
 
@@ -232,15 +191,11 @@ namespace WindowsEventLogMonitor
             Console.WriteLine("");
             Console.WriteLine("用法:");
             Console.WriteLine("  WindowsEventLogMonitor.exe                          - 图形界面模式");
-            Console.WriteLine("  WindowsEventLogMonitor.exe install                  - 安装Windows服务");
-            Console.WriteLine("  WindowsEventLogMonitor.exe uninstall                - 卸载Windows服务");
-            Console.WriteLine("  WindowsEventLogMonitor.exe service                  - 以服务模式运行");
             Console.WriteLine("  WindowsEventLogMonitor.exe console                  - 以控制台模式运行");
             Console.WriteLine("  WindowsEventLogMonitor.exe test-logid               - 测试日志ID提取功能");
             Console.WriteLine("  WindowsEventLogMonitor.exe analyze-duplicates [type] - 分析重复的日志记录");
             Console.WriteLine("  WindowsEventLogMonitor.exe cleanup-duplicates [type] - 清理重复的日志记录");
-            Console.WriteLine("  WindowsEventLogMonitor.exe set-autostart-mode gui [--minimize]  - 设置GUI模式自启动");
-            Console.WriteLine("  WindowsEventLogMonitor.exe set-autostart-mode service          - 设置服务模式自启动");
+            Console.WriteLine("  WindowsEventLogMonitor.exe set-autostart-mode [--minimize]  - 设置开机自启动");
             Console.WriteLine("  WindowsEventLogMonitor.exe disable-autostart                   - 禁用自启动");
             Console.WriteLine("  WindowsEventLogMonitor.exe query-autostart                     - 查询自启动状态");
             Console.WriteLine("  WindowsEventLogMonitor.exe --help                   - 显示此帮助信息");
@@ -249,17 +204,11 @@ namespace WindowsEventLogMonitor
             Console.WriteLine("  [type] - 日志类型，可选值: sql_server_push_log, push_log (默认: sql_server_push_log)");
             Console.WriteLine("");
             Console.WriteLine("注意:");
-            Console.WriteLine("- 安装/卸载服务需要管理员权限");
-            Console.WriteLine("- 服务模式由Windows服务管理器控制");
             Console.WriteLine("- 控制台模式用于调试和测试");
             Console.WriteLine("- 配置文件: config.json");
             Console.WriteLine("- cleanup-duplicates 会备份原文件");
             Console.WriteLine("");
             Console.WriteLine("示例:");
-            Console.WriteLine("  # 安装并启动服务");
-            Console.WriteLine("  WindowsEventLogMonitor.exe install");
-            Console.WriteLine("  net start SqlServerLogMonitor");
-            Console.WriteLine("");
             Console.WriteLine("  # 调试模式运行");
             Console.WriteLine("  WindowsEventLogMonitor.exe console");
             Console.WriteLine("");

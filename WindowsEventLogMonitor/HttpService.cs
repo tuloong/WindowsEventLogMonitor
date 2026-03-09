@@ -143,14 +143,15 @@ internal class HttpService
     {
         try
         {
-            var testData = new { test = "connection", timestamp = DateTime.Now };
-            var jsonData = System.Text.Json.JsonSerializer.Serialize(testData);
+            // 构建 health 端点 URL
+            var baseUrl = apiUrl.TrimEnd('/');
+            // 如果 URL 以 /api/aa/ 开头，使用 /api/aa/health
+            var healthUrl = baseUrl.Contains("/api/aa/") && !baseUrl.EndsWith("/health")
+                ? $"{baseUrl.Substring(0, baseUrl.IndexOf("/api/aa/") + 8)}health"
+                : $"{baseUrl}/health";
 
-            using (var content = new StringContent(jsonData, Encoding.UTF8, "application/json"))
-            {
-                var response = await client.PostAsync(apiUrl, content).ConfigureAwait(false);
-                return response.IsSuccessStatusCode;
-            }
+            var response = await client.GetAsync(healthUrl).ConfigureAwait(false);
+            return response.IsSuccessStatusCode;
         }
         catch
         {

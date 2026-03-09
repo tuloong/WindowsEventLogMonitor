@@ -9,7 +9,6 @@ using System.Text;
 using System.Threading.Tasks;
 using Microsoft.VisualBasic.Logging;
 using System.Text.RegularExpressions;
-using System.ServiceProcess;
 using System.Drawing;
 using System.Threading;
 using WindowsEventLogMonitor.Services;
@@ -51,10 +50,21 @@ namespace WindowsEventLogMonitor
             // 初始化日志文件管理器
             LogFileManager.Initialize();
 
-            UpdateServiceStatus();
-
             // 初始化自动刷新状态显示
             UpdateAutoRefreshStatusDisplay();
+
+            // 订阅 Shown 事件以在窗体显示后自动启动监控
+            this.Shown += MainForm_Shown;
+        }
+
+        private void MainForm_Shown(object sender, EventArgs e)
+        {
+            // 窗体显示后自动启动SQL Server监控
+            if (config.SqlServerMonitoring.Enabled && !isSQLServerMonitoring)
+            {
+                LogMessage("应用启动，自动开始SQL Server监控...");
+                BtnStartSQLServerMonitoring_Click(null, null);
+            }
         }
 
         private void InitializeServices()
@@ -116,28 +126,45 @@ namespace WindowsEventLogMonitor
             // 加载自启动配置
             if (config.AutoStart != null)
             {
-                checkBoxEnableAutoStart.Checked = config.AutoStart.Enabled;
-
-                if (config.AutoStart.Mode == AutoStartMode.Gui)
+                // 先设置下级控件状态，再设置复选框状态（避免事件触发时的冲突）
+                if (config.AutoStart.Enabled)
                 {
+                    radioButtonGuiMode.Enabled = true;
                     radioButtonGuiMode.Checked = true;
+                    checkBoxMinimizeToTray.Enabled = true;
+                    checkBoxMinimizeToTray.Checked = config.AutoStart.MinimizeToTray;
+                    comboBoxAutoStartMethod.Enabled = true;
+                    comboBoxAutoStartMethod.SelectedIndex = (int)config.AutoStart.Method;
                 }
-                else if (config.AutoStart.Mode == AutoStartMode.Service)
+                else
                 {
-                    radioButtonServiceMode.Checked = true;
+                    radioButtonGuiMode.Enabled = false;
+                    radioButtonGuiMode.Checked = false;
+                    checkBoxMinimizeToTray.Enabled = false;
+                    checkBoxMinimizeToTray.Checked = config.AutoStart.MinimizeToTray;
+                    comboBoxAutoStartMethod.Enabled = false;
+                    comboBoxAutoStartMethod.SelectedIndex = (int)config.AutoStart.Method;
                 }
 
-                checkBoxMinimizeToTray.Checked = config.AutoStart.MinimizeToTray;
+                checkBoxEnableAutoStart.Checked = config.AutoStart.Enabled;
             }
 
             // 检查实际注册表/服务状态是否与配置一致
             var autoStartService = new Services.AutoStartService();
-            var actualStatus = autoStartService.GetStatus();
+            var configMethod = config.AutoStart?.Method ?? Services.AutoStartMethod.Registry;
+            var actualStatus = autoStartService.GetStatus(configMethod);
+            
             if (actualStatus == Services.AutoStartStatus.Disabled && config.AutoStart.Enabled)
             {
                 // 配置启用但实际未启用，提示用户
                 MessageBox.Show("自启动配置与实际状态不一致，请重新保存配置。",
                     "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            else if (actualStatus == Services.AutoStartStatus.GuiEnabled && !config.AutoStart.Enabled)
+            {
+                // 配置禁用但还有条目，自动清理
+                autoStartService.DisableAllAutoStart();
+                System.Diagnostics.Debug.WriteLine("[MainForm] 自动清理了遗留的自启动条目");
             }
         }
 
@@ -612,45 +639,41 @@ namespace WindowsEventLogMonitor
                 config.SqlServerMonitoring.IncludeMSSQLSERVER = checkBoxIncludeMSSQLSERVER.Checked;
                 config.SqlServerMonitoring.IncludeWindowsAuth = checkBoxIncludeWindowsAuth.Checked;
 
-                Config.SaveConfig(config);
-
-                // 保存自启动配置
+                // 保存自启动配置（必须在 SaveConfig 之前设置）
                 config.AutoStart.Enabled = checkBoxEnableAutoStart.Checked;
-
-                if (radioButtonGuiMode.Checked)
-                {
-                    config.AutoStart.Mode = AutoStartMode.Gui;
-                }
-                else if (radioButtonServiceMode.Checked)
-                {
-                    config.AutoStart.Mode = AutoStartMode.Service;
-                }
-
+                config.AutoStart.Mode = AutoStartMode.Gui;
+                config.AutoStart.Method = (Services.AutoStartMethod)comboBoxAutoStartMethod.SelectedIndex;
                 config.AutoStart.MinimizeToTray = checkBoxMinimizeToTray.Checked;
+
+                Config.SaveConfig(config);
 
                 // 应用自启动设置
                 var autoStartService = new Services.AutoStartService();
                 bool success;
+                var selectedMethod = (Services.AutoStartMethod)comboBoxAutoStartMethod.SelectedIndex;
 
                 if (config.AutoStart.Enabled)
                 {
-                    if (config.AutoStart.Mode == AutoStartMode.Gui)
-                    {
-                        success = autoStartService.EnableGuiAutoStart(config.AutoStart.MinimizeToTray);
-                    }
-                    else
-                    {
-                        success = autoStartService.EnableServiceAutoStart();
-                    }
+                    // 先禁用所有方式，然后启用选中的方式
+                    autoStartService.DisableAllAutoStart();
+                    success = autoStartService.EnableAutoStart(selectedMethod, config.AutoStart.MinimizeToTray);
                 }
                 else
                 {
-                    success = autoStartService.DisableAutoStart();
+                    // 禁用所有方式
+                    success = autoStartService.DisableAllAutoStart();
                 }
 
                 if (!success)
                 {
-                    MessageBox.Show("自启动设置保存失败，请检查权限或以管理员身份运行。",
+                    var methodName = selectedMethod switch
+                    {
+                        Services.AutoStartMethod.Registry => "注册表",
+                        Services.AutoStartMethod.TaskScheduler => "任务计划",
+                        Services.AutoStartMethod.StartupFolder => "启动文件夹",
+                        _ => "未知"
+                    };
+                    MessageBox.Show($"自启动设置保存失败（{methodName}），请检查权限或以管理员身份运行。\n提示: 任务计划方式可能需要管理员权限。",
                         "警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
 
@@ -704,298 +727,6 @@ namespace WindowsEventLogMonitor
 
         #endregion
 
-        #region 服务管理事件处理
-
-        private void BtnInstallService_Click(object sender, EventArgs e)
-        {
-            try
-            {
-                ServiceInstaller.InstallService();
-                LogMessage("服务安装完成");
-                UpdateServiceStatus();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"安装服务失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                AddError("安装服务失败", ex.Message);
-            }
-        }
-
-        private void BtnUninstallService_Click(object sender, EventArgs e)
-        {
-            try
-            {
-                ServiceInstaller.UninstallService();
-                LogMessage("服务卸载完成");
-                UpdateServiceStatus();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"卸载服务失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                AddError("卸载服务失败", ex.Message);
-            }
-        }
-
-        private async void BtnStartService_Click(object sender, EventArgs e)
-        {
-            try
-            {
-                // 首先检查服务是否已安装
-                if (!IsServiceInstalled("SqlServerLogMonitor"))
-                {
-                    var result = MessageBox.Show(
-                        "Windows 服务 'SqlServerLogMonitor' 尚未安装。\n\n" +
-                        "请使用以下方式之一安装服务：\n" +
-                        "1. 右键点击项目根目录下的 'install_service.bat' 文件，选择'以管理员身份运行'\n" +
-                        "2. 以管理员身份运行 PowerShell，切换到程序目录，执行: .\\WindowsEventLogMonitor.exe install\n\n" +
-                        "是否现在打开安装脚本所在的文件夹？",
-                        "服务未安装",
-                        MessageBoxButtons.YesNo,
-                        MessageBoxIcon.Information);
-
-                    if (result == DialogResult.Yes)
-                    {
-                        // 打开项目根目录
-                        var projectRoot = Path.GetDirectoryName(Path.GetDirectoryName(Application.ExecutablePath));
-                        System.Diagnostics.Process.Start("explorer.exe", projectRoot);
-                    }
-                    return;
-                }
-
-                // 禁用按钮防止重复点击
-                btnStartService.Enabled = false;
-                LogMessage("正在启动服务...");
-
-                await Task.Run(() =>
-                {
-                    // 首先尝试启用服务（解决服务被禁用的情况）
-                    try
-                    {
-                        using (var service = new ServiceController("SqlServerLogMonitor"))
-                        {
-                            // 如果服务被禁用，尝试启用它
-                            if (service.StartType == ServiceStartMode.Disabled)
-                            {
-                                BeginInvoke(new Action(() => LogMessage("服务被禁用，正在启用...")));
-                                EnableService();
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        BeginInvoke(new Action(() => LogMessage($"检查/启用服务状态失败: {ex.Message}")));
-                    }
-
-                    using (var service = new ServiceController("SqlServerLogMonitor"))
-                    {
-                        switch (service.Status)
-                        {
-                            case ServiceControllerStatus.Running:
-                                BeginInvoke(new Action(() =>
-                                {
-                                    LogMessage("服务已在运行中");
-                                    MessageBox.Show("服务已在运行中", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                                }));
-                                break;
-
-                            case ServiceControllerStatus.StartPending:
-                                BeginInvoke(new Action(() => LogMessage("服务正在启动中，请稍候...")));
-                                service.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(30));
-                                BeginInvoke(new Action(() => LogMessage("服务已启动")));
-                                break;
-
-                            case ServiceControllerStatus.Stopped:
-                            case ServiceControllerStatus.StopPending:
-                                if (service.Status == ServiceControllerStatus.StopPending)
-                                {
-                                    BeginInvoke(new Action(() => LogMessage("等待服务停止完成...")));
-                                    service.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(30));
-                                }
-
-                                BeginInvoke(new Action(() => LogMessage("正在启动服务...")));
-                                service.Start();
-                                service.WaitForStatus(ServiceControllerStatus.Running, TimeSpan.FromSeconds(30));
-                                BeginInvoke(new Action(() =>
-                                {
-                                    LogMessage("服务已成功启动");
-                                    MessageBox.Show("服务已成功启动", "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                                }));
-                                break;
-
-                            default:
-                                BeginInvoke(new Action(() =>
-                                {
-                                    LogMessage($"服务状态: {service.Status}");
-                                    MessageBox.Show($"服务当前状态: {service.Status}\n无法启动服务", "警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                                }));
-                                break;
-                        }
-                    }
-                });
-
-                UpdateServiceStatus();
-            }
-            catch (System.ServiceProcess.TimeoutException)
-            {
-                var message = "服务启动超时。可能的原因：\n" +
-                            "1. 配置文件 config.json 有误\n" +
-                            "2. API URL 无法访问\n" +
-                            "3. 缺少必要的权限\n\n" +
-                            "请检查配置后重试。";
-                MessageBox.Show(message, "启动超时", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                AddError("服务启动超时", "服务在30秒内未能启动完成");
-            }
-            catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 5)
-            {
-                var message = "权限不足。请以管理员身份运行此程序，或确保当前用户有启动服务的权限。";
-                MessageBox.Show(message, "权限错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                AddError("启动服务失败", "权限不足");
-            }
-            catch (Exception ex)
-            {
-                // 检查是否是权限相关错误
-                if (ex.Message.Contains("Cannot open") || ex.Message.Contains("拒绝访问") || ex.Message.Contains("Access is denied"))
-                {
-                    var permissionMessage = "权限不足，无法访问服务。\n\n" +
-                        "请以管理员身份运行此程序：\n" +
-                        "1. 右键点击程序图标\n" +
-                        "2. 选择'以管理员身份运行'\n\n" +
-                        "或者使用命令行启动服务：\n" +
-                        "net start SqlServerLogMonitor";
-                    MessageBox.Show(permissionMessage, "权限错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    AddError("启动服务失败", "权限不足 - 需要管理员身份运行");
-                }
-                else
-                {
-                    var message = $"启动服务失败: {ex.Message}\n\n" +
-                                "可能的解决方案：\n" +
-                                "1. 确保服务已正确安装\n" +
-                                "2. 检查配置文件是否正确\n" +
-                                "3. 以管理员身份运行程序";
-                    MessageBox.Show(message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    AddError("启动服务失败", ex.Message);
-                }
-            }
-            finally
-            {
-                // 重新启用按钮
-                btnStartService.Enabled = true;
-            }
-        }
-
-        /// <summary>
-        /// 启用被禁用的服务
-        /// </summary>
-        private void EnableService()
-        {
-            try
-            {
-                var startInfo = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "sc.exe",
-                    Arguments = "config SqlServerLogMonitor start= auto",
-                    Verb = "runas",
-                    UseShellExecute = true,
-                    CreateNoWindow = true
-                };
-
-                var process = System.Diagnostics.Process.Start(startInfo);
-                process?.WaitForExit(5000);
-
-                if (process?.ExitCode == 0)
-                {
-                    BeginInvoke(new Action(() => LogMessage("服务已启用")));
-                }
-                else
-                {
-                    BeginInvoke(new Action(() => LogMessage("启用服务失败，可能需要管理员权限")));
-                }
-            }
-            catch (Exception ex)
-            {
-                BeginInvoke(new Action(() => LogMessage($"启用服务时出错: {ex.Message}")));
-            }
-        }
-
-        private async void BtnStopService_Click(object sender, EventArgs e)
-        {
-            try
-            {
-                btnStopService.Enabled = false;
-                LogMessage("正在停止服务...");
-
-                await Task.Run(() =>
-                {
-                    using (var service = new ServiceController("SqlServerLogMonitor"))
-                    {
-                        if (service.Status != ServiceControllerStatus.Stopped)
-                        {
-                            service.Stop();
-                            service.WaitForStatus(ServiceControllerStatus.Stopped, TimeSpan.FromSeconds(30));
-                            BeginInvoke(new Action(() => LogMessage("服务已停止")));
-                        }
-                        else
-                        {
-                            BeginInvoke(new Action(() => LogMessage("服务已经处于停止状态")));
-                        }
-                    }
-                });
-
-                UpdateServiceStatus();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"停止服务失败: {ex.Message}", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                AddError("停止服务失败", ex.Message);
-            }
-            finally
-            {
-                btnStopService.Enabled = true;
-            }
-        }
-
-        private void UpdateServiceStatus()
-        {
-            try
-            {
-                if (!IsServiceInstalled("SqlServerLogMonitor"))
-                {
-                    lblServiceStatus.Text = "服务状态: 未安装";
-                    lblServiceStatus.ForeColor = Color.Gray;
-                    return;
-                }
-
-                using (var service = new ServiceController("SqlServerLogMonitor"))
-                {
-                    var status = service.Status.ToString();
-                    var statusText = status switch
-                    {
-                        "Running" => "运行中",
-                        "Stopped" => "已停止",
-                        "StartPending" => "正在启动",
-                        "StopPending" => "正在停止",
-                        "Paused" => "已暂停",
-                        "PausePending" => "正在暂停",
-                        "ContinuePending" => "正在恢复",
-                        _ => status
-                    };
-
-                    lblServiceStatus.Text = $"服务状态: {statusText}";
-                    lblServiceStatus.ForeColor = service.Status == ServiceControllerStatus.Running ? Color.Green :
-                                                 service.Status == ServiceControllerStatus.Stopped ? Color.Red : Color.Orange;
-                }
-            }
-            catch (Exception ex)
-            {
-                lblServiceStatus.Text = "服务状态: 检查失败";
-                lblServiceStatus.ForeColor = Color.Red;
-                // 记录错误但不显示消息框，因为这个方法可能被频繁调用
-                AddError("检查服务状态失败", ex.Message);
-            }
-        }
-
-        #endregion
-
         #region 状态统计事件处理
 
         private void BtnClearErrors_Click(object sender, EventArgs e)
@@ -1028,40 +759,10 @@ namespace WindowsEventLogMonitor
                     var successRate = (logsUploaded * 100) / totalLogsProcessed;
                     progressBarUpload.Value = Math.Min(successRate, 100);
                 }
-
-                UpdateServiceStatus();
             }
             catch (Exception ex)
             {
                 AddError("更新状态显示失败", ex.Message);
-            }
-        }
-
-        /// <summary>
-        /// 检查指定的Windows服务是否已安装
-        /// </summary>
-        /// <param name="serviceName">服务名称</param>
-        /// <returns>如果服务已安装返回true，否则返回false</returns>
-        private bool IsServiceInstalled(string serviceName)
-        {
-            try
-            {
-                using (var service = new ServiceController(serviceName))
-                {
-                    // 尝试访问服务状态，如果服务不存在会抛出异常
-                    var status = service.Status;
-                    return true;
-                }
-            }
-            catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1060)
-            {
-                // 错误代码1060表示"指定的服务不存在"
-                return false;
-            }
-            catch (Exception)
-            {
-                // 其他异常也认为服务不可用
-                return false;
             }
         }
 
@@ -1112,26 +813,8 @@ namespace WindowsEventLogMonitor
 
         private void LogMessage(string message)
         {
-            if (textBoxServiceLog.InvokeRequired)
-            {
-                textBoxServiceLog.Invoke(new Action(() => LogMessage(message)));
-                return;
-            }
-
             var logMessage = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}";
-            textBoxServiceLog.AppendText(logMessage + Environment.NewLine);
-
-            // 保持日志显示在最新位置
-            textBoxServiceLog.SelectionStart = textBoxServiceLog.Text.Length;
-            textBoxServiceLog.ScrollToCaret();
-
-            // 限制日志行数
-            var lines = textBoxServiceLog.Lines;
-            if (lines.Length > 200)
-            {
-                var keepLines = lines.Skip(lines.Length - 100).ToArray();
-                textBoxServiceLog.Lines = keepLines;
-            }
+            Debug.WriteLine(logMessage);
         }
 
         private void StartSQLServerMonitoringFromTray()
@@ -1425,29 +1108,35 @@ namespace WindowsEventLogMonitor
         private void CheckBoxEnableAutoStart_CheckedChanged(object sender, EventArgs e)
         {
             var enabled = checkBoxEnableAutoStart.Checked;
+            
+            // 启用/禁用所有子控件
+            comboBoxAutoStartMethod.Enabled = enabled;
+            labelAutoStartMethod.Enabled = enabled;
             radioButtonGuiMode.Enabled = enabled;
-            radioButtonServiceMode.Enabled = enabled;
+            checkBoxMinimizeToTray.Enabled = enabled;
+            labelAutoStartHint.Enabled = enabled;
 
             if (enabled)
             {
-                // 默认选中 GUI 模式（如果没有选中任何模式）
-                if (!radioButtonGuiMode.Checked && !radioButtonServiceMode.Checked)
+                // 默认选中 GUI 模式（如果未选中）
+                if (!radioButtonGuiMode.Checked)
                 {
                     radioButtonGuiMode.Checked = true;
                 }
-
-                // 根据 GUI 模式是否选中来决定最小化复选框的可用性
-                checkBoxMinimizeToTray.Enabled = radioButtonGuiMode.Checked;
             }
             else
             {
-                checkBoxMinimizeToTray.Enabled = false;
+                radioButtonGuiMode.Checked = false;
             }
         }
 
         private void RadioButtonGuiMode_CheckedChanged(object sender, EventArgs e)
         {
-            checkBoxMinimizeToTray.Enabled = radioButtonGuiMode.Checked;
+            // 只有当自启动启用时，才根据 GUI 模式选中状态控制最小化复选框
+            if (checkBoxEnableAutoStart.Checked)
+            {
+                checkBoxMinimizeToTray.Enabled = radioButtonGuiMode.Checked;
+            }
         }
 
         #endregion

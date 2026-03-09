@@ -9,7 +9,7 @@ using WindowsEventLogMonitor.Services;
 
 namespace WindowsEventLogMonitor;
 
-internal class Config
+public class Config
 {
     public string ApiUrl { get; set; } = "https://localhost:5000/api/aa/WindowsEventMonitor/SaveEventLog";
     public SqlServerMonitoringConfig SqlServerMonitoring { get; set; } = new();
@@ -78,6 +78,17 @@ public class SqlServerMonitoringConfig
     public int BatchSize { get; set; } = 10;
     public bool IncludeMSSQLSERVER { get; set; } = true;
     public bool IncludeWindowsAuth { get; set; } = true;
+    
+    /// <summary>
+    /// UI显示的最大日志数量（避免界面卡顿）
+    /// </summary>
+    public int MaxDisplayLogs { get; set; } = 500;
+    
+    /// <summary>
+    /// 内存缓存的最大日志数量（避免内存溢出）
+    /// </summary>
+    public int MaxCacheLogs { get; set; } = 1000;
+    
     public EventIdsConfig EventIds { get; set; } = new();
 }
 
@@ -120,6 +131,11 @@ public class AutoStartConfig
     /// 自启动模式：GUI 或 Service
     /// </summary>
     public AutoStartMode Mode { get; set; } = AutoStartMode.Gui;
+
+    /// <summary>
+    /// 自启动方式：注册表、任务计划、启动文件夹
+    /// </summary>
+    public AutoStartMethod Method { get; set; } = AutoStartMethod.Registry;
 
     /// <summary>
     /// GUI 模式下启动时是否最小化到系统托盘

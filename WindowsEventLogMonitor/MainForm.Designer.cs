@@ -69,15 +69,6 @@
         private NumericUpDown numericUpDownRetentionDays;
         private NumericUpDown numericUpDownMaxLogFileSize;
 
-        // 服务管理页面控件
-        private GroupBox groupBoxServiceManagement;
-        private Button btnInstallService;
-        private Button btnUninstallService;
-        private Button btnStartService;
-        private Button btnStopService;
-        private Label lblServiceStatus;
-        private TextBox textBoxServiceLog;
-
         // 状态页面控件
         private GroupBox groupBoxStatistics;
         private Label lblTotalLogsProcessed;
@@ -97,7 +88,9 @@
         private CheckBox checkBoxEnableAutoStart;
         private RadioButton radioButtonGuiMode;
         private CheckBox checkBoxMinimizeToTray;
-        private RadioButton radioButtonServiceMode;
+        private Label labelAutoStartMethod;
+        private ComboBox comboBoxAutoStartMethod;
+        private Label labelAutoStartHint;
 
         /// <summary>
         ///  Required method for Designer support - do not modify
@@ -123,8 +116,7 @@
             InitializeSQLServerTab();
             InitializeGeneralLogsTab();
             InitializeConfigurationTab();
-            InitializeAutoStartControls();
-            InitializeServiceTab();
+            // InitializeAutoStartControls() 已在 InitializeConfigurationTab() 中调用
             InitializeStatusTab();
 
             this.Controls.Add(tabControlMain);
@@ -814,125 +806,6 @@
             groupBoxLogRetention.Controls.Add(retentionTable);
         }
 
-        private void InitializeServiceTab()
-        {
-            var mainPanel = new TableLayoutPanel();
-            mainPanel.Dock = DockStyle.Fill;
-            mainPanel.ColumnCount = 1;
-            mainPanel.RowCount = 3;
-            mainPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 180F)); // 调整服务管理组高度
-            mainPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-            mainPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 60F));
-            mainPanel.Padding = new Padding(10); // 添加主面板内边距
-
-            // 服务管理组
-            groupBoxServiceManagement = new GroupBox();
-            groupBoxServiceManagement.Text = "Windows服务管理";
-            groupBoxServiceManagement.Dock = DockStyle.Fill;
-            groupBoxServiceManagement.Padding = new Padding(15, 20, 15, 15);
-            groupBoxServiceManagement.Font = new Font("微软雅黑", 9F, FontStyle.Bold);
-
-            var serviceTable = new TableLayoutPanel();
-            serviceTable.Dock = DockStyle.Fill;
-            serviceTable.ColumnCount = 4;
-            serviceTable.RowCount = 3;
-            serviceTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25F));
-            serviceTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25F));
-            serviceTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25F));
-            serviceTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25F));
-            serviceTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 45F)); // 按钮行高度
-            serviceTable.RowStyles.Add(new RowStyle(SizeType.Absolute, 35F)); // 状态行高度
-            serviceTable.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-            serviceTable.Padding = new Padding(5);
-
-            btnInstallService = new Button();
-            btnInstallService.Text = "安装服务";
-            btnInstallService.Dock = DockStyle.Fill;
-            btnInstallService.Font = new Font("微软雅黑", 9F, FontStyle.Bold);
-            btnInstallService.Margin = new Padding(5, 8, 5, 8);
-            btnInstallService.FlatStyle = FlatStyle.Flat;
-            btnInstallService.FlatAppearance.BorderSize = 0;
-            btnInstallService.BackColor = Color.LightBlue;
-            btnInstallService.Click += BtnInstallService_Click;
-            serviceTable.Controls.Add(btnInstallService, 0, 0);
-
-            btnUninstallService = new Button();
-            btnUninstallService.Text = "卸载服务";
-            btnUninstallService.Dock = DockStyle.Fill;
-            btnUninstallService.Font = new Font("微软雅黑", 9F, FontStyle.Bold);
-            btnUninstallService.Margin = new Padding(5, 8, 5, 8);
-            btnUninstallService.FlatStyle = FlatStyle.Flat;
-            btnUninstallService.FlatAppearance.BorderSize = 0;
-            btnUninstallService.BackColor = Color.LightGray;
-            btnUninstallService.Click += BtnUninstallService_Click;
-            serviceTable.Controls.Add(btnUninstallService, 1, 0);
-
-            btnStartService = new Button();
-            btnStartService.Text = "启动服务";
-            btnStartService.Dock = DockStyle.Fill;
-            btnStartService.BackColor = Color.LightGreen;
-            btnStartService.Font = new Font("微软雅黑", 9F, FontStyle.Bold);
-            btnStartService.Margin = new Padding(5, 8, 5, 8);
-            btnStartService.FlatStyle = FlatStyle.Flat;
-            btnStartService.FlatAppearance.BorderSize = 0;
-            btnStartService.Click += BtnStartService_Click;
-            serviceTable.Controls.Add(btnStartService, 2, 0);
-
-            btnStopService = new Button();
-            btnStopService.Text = "停止服务";
-            btnStopService.Dock = DockStyle.Fill;
-            btnStopService.BackColor = Color.LightCoral;
-            btnStopService.Font = new Font("微软雅黑", 9F, FontStyle.Bold);
-            btnStopService.Margin = new Padding(5, 8, 5, 8);
-            btnStopService.FlatStyle = FlatStyle.Flat;
-            btnStopService.FlatAppearance.BorderSize = 0;
-            btnStopService.Click += BtnStopService_Click;
-            serviceTable.Controls.Add(btnStopService, 3, 0);
-
-            lblServiceStatus = new Label();
-            lblServiceStatus.Text = "服务状态: 检查中...";
-            lblServiceStatus.Dock = DockStyle.Fill;
-            lblServiceStatus.TextAlign = ContentAlignment.MiddleLeft;
-            lblServiceStatus.ForeColor = Color.Blue;
-            lblServiceStatus.Font = new Font("微软雅黑", 9F, FontStyle.Bold);
-            lblServiceStatus.Margin = new Padding(3, 5, 3, 5);
-            serviceTable.Controls.Add(lblServiceStatus, 0, 1);
-            serviceTable.SetColumnSpan(lblServiceStatus, 4);
-
-            groupBoxServiceManagement.Controls.Add(serviceTable);
-
-            // 服务日志显示
-            textBoxServiceLog = new TextBox();
-            textBoxServiceLog.Dock = DockStyle.Fill;
-            textBoxServiceLog.Multiline = true;
-            textBoxServiceLog.ScrollBars = ScrollBars.Both;
-            textBoxServiceLog.ReadOnly = true;
-            textBoxServiceLog.Font = new Font("Consolas", 9F);
-            textBoxServiceLog.BackColor = Color.Black;
-            textBoxServiceLog.ForeColor = Color.LightGreen;
-            textBoxServiceLog.Margin = new Padding(10, 5, 10, 5);
-
-            // 状态栏
-            var statusPanel = new Panel();
-            statusPanel.Dock = DockStyle.Fill;
-            statusPanel.BackColor = Color.FromArgb(245, 245, 245);
-            statusPanel.Padding = new Padding(15, 10, 15, 10);
-
-            var statusLabel = new Label();
-            statusLabel.Text = "Windows服务管理 - 安装、启动、停止监控服务";
-            statusLabel.Dock = DockStyle.Fill;
-            statusLabel.TextAlign = ContentAlignment.MiddleLeft;
-            statusLabel.Font = new Font("微软雅黑", 9F);
-            statusLabel.ForeColor = Color.FromArgb(100, 100, 100);
-            statusPanel.Controls.Add(statusLabel);
-
-            mainPanel.Controls.Add(groupBoxServiceManagement, 0, 0);
-            mainPanel.Controls.Add(textBoxServiceLog, 0, 1);
-            mainPanel.Controls.Add(statusPanel, 0, 2);
-
-            tabPageService.Controls.Add(mainPanel);
-        }
-
         private void InitializeStatusTab()
         {
             var mainPanel = new TableLayoutPanel();
@@ -1075,23 +948,47 @@
             {
                 Text = "自启动设置",
                 Location = new Point(20, 400),
-                Size = new Size(600, 150)
+                Size = new Size(600, 180)
             };
 
             // 启用自启动复选框
             checkBoxEnableAutoStart = new CheckBox
             {
                 Text = "开机自动启动",
-                Location = new Point(20, 30),
+                Location = new Point(20, 25),
                 AutoSize = true
             };
             checkBoxEnableAutoStart.CheckedChanged += CheckBoxEnableAutoStart_CheckedChanged;
+
+            // 自启动方式标签
+            labelAutoStartMethod = new Label
+            {
+                Text = "自启动方式:",
+                Location = new Point(40, 52),
+                AutoSize = true
+            };
+
+            // 自启动方式下拉框
+            comboBoxAutoStartMethod = new ComboBox
+            {
+                Location = new Point(120, 49),
+                Width = 200,
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                Enabled = false
+            };
+            comboBoxAutoStartMethod.Items.AddRange(new object[]
+            {
+                "注册表 (Registry)",
+                "任务计划 (Task Scheduler)",
+                "启动文件夹 (Startup Folder)"
+            });
+            comboBoxAutoStartMethod.SelectedIndex = 0;
 
             // GUI 模式单选按钮
             radioButtonGuiMode = new RadioButton
             {
                 Text = "以图形界面模式启动",
-                Location = new Point(40, 55),
+                Location = new Point(40, 80),
                 AutoSize = true,
                 Enabled = false
             };
@@ -1101,43 +998,35 @@
             checkBoxMinimizeToTray = new CheckBox
             {
                 Text = "启动时最小化到系统托盘",
-                Location = new Point(60, 80),
+                Location = new Point(60, 105),
                 AutoSize = true,
                 Enabled = false
             };
-
-            // 服务模式单选按钮
-            radioButtonServiceMode = new RadioButton
+            
+            // 提示标签
+            labelAutoStartHint = new Label
             {
-                Text = "以服务模式启动",
-                Location = new Point(40, 105),
-                AutoSize = true,
-                Enabled = false
-            };
-
-            // 服务模式提示标签
-            var lblServiceHint = new Label
-            {
-                Text = "（需先安装 Windows 服务）",
-                Location = new Point(160, 107),
+                Text = "提示: Windows Server 建议使用“任务计划”方式",
+                Location = new Point(40, 135),
                 AutoSize = true,
                 ForeColor = Color.Gray,
-                Font = new Font(this.Font.FontFamily, 8)
+                Font = new Font(Font.FontFamily, 8)
             };
 
             groupBoxAutoStart.Controls.AddRange(new Control[]
             {
                 checkBoxEnableAutoStart,
+                labelAutoStartMethod,
+                comboBoxAutoStartMethod,
                 radioButtonGuiMode,
                 checkBoxMinimizeToTray,
-                radioButtonServiceMode,
-                lblServiceHint
+                labelAutoStartHint
             });
 
             // 注意：需要在 InitializeConfigurationTab 中将此控件添加到 mainPanel
             // 这里使用 DockStyle.Top 让它显示在配置页面底部
             groupBoxAutoStart.Dock = DockStyle.Top;
-            groupBoxAutoStart.Height = 150;
+            groupBoxAutoStart.Height = 165;
             groupBoxAutoStart.Margin = new Padding(5, 10, 5, 10);
         }
 

@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
+using WindowsEventLogMonitor.Services;
 
 namespace WindowsEventLogMonitor;
 
@@ -15,6 +16,7 @@ internal class Config
     public RetryPolicyConfig RetryPolicy { get; set; } = new();
     public LogRetentionConfig LogRetention { get; set; } = new();
     public SecurityConfig Security { get; set; } = new();
+    public AutoStartConfig AutoStart { get; set; } = new();
 
     private static Config? cachedConfig;
 
@@ -93,4 +95,22 @@ public class SecurityConfig
     public bool UseHttps { get; set; } = true;
     public string ApiKey { get; set; } = "";
     public int TimeoutSeconds { get; set; } = 30;
+}
+
+public class AutoStartConfig
+{
+    /// <summary>
+    /// 是否启用开机自启动
+    /// </summary>
+    public bool Enabled { get; set; } = false;
+
+    /// <summary>
+    /// 自启动模式：GUI 或 Service
+    /// </summary>
+    public AutoStartMode Mode { get; set; } = AutoStartMode.Gui;
+
+    /// <summary>
+    /// GUI 模式下启动时是否最小化到系统托盘
+    /// </summary>
+    public bool MinimizeToTray { get; set; } = true;
 }

@@ -20,10 +20,21 @@ internal class Config
 
     private static Config? cachedConfig;
 
+    /// <summary>
+    /// 获取配置文件路径（程序所在目录）
+    /// </summary>
+    private static string GetConfigFilePath()
+    {
+        var exePath = System.Reflection.Assembly.GetExecutingAssembly().Location;
+        var exeDir = Path.GetDirectoryName(exePath) ?? AppDomain.CurrentDomain.BaseDirectory;
+        return Path.Combine(exeDir, "config.json");
+    }
+
     public static void SaveConfig(Config config)
     {
+        var configPath = GetConfigFilePath();
         var json = JsonConvert.SerializeObject(config, Formatting.Indented);
-        File.WriteAllText("config.json", json);
+        File.WriteAllText(configPath, json);
         cachedConfig = config;
     }
 
@@ -40,9 +51,10 @@ internal class Config
     {
         try
         {
-            if (File.Exists("config.json"))
+            var configPath = GetConfigFilePath();
+            if (File.Exists(configPath))
             {
-                var json = File.ReadAllText("config.json");
+                var json = File.ReadAllText(configPath);
                 cachedConfig = JsonConvert.DeserializeObject<Config>(json) ?? new Config();
             }
             else

@@ -60,6 +60,43 @@ namespace WindowsEventLogMonitor
                         }
                         return;
 
+                    case "--autostart-gui":
+                        RunAsGuiWithAutoStart(args);
+                        return;
+
+                    case "set-autostart-mode":
+                        if (args.Length > 1)
+                        {
+                            var mode = args[1].ToLower();
+                            var minimize = args.Contains("--minimize") || args.Contains("-m");
+                            SetAutoStartMode(mode, minimize);
+                        }
+                        else
+                        {
+                            Console.WriteLine("用法: WindowsEventLogMonitor.exe set-autostart-mode gui|service [--minimize]");
+                        }
+                        return;
+
+                    case "disable-autostart":
+                        var autoStartService = new Services.AutoStartService();
+                        var disabled = autoStartService.DisableAutoStart();
+                        Console.WriteLine(disabled ? "自启动已禁用" : "禁用自启动失败");
+                        return;
+
+                    case "query-autostart":
+                        var queryService = new Services.AutoStartService();
+                        var status = queryService.GetStatus();
+                        Console.WriteLine($"当前自启动状态: {status}");
+
+                        var config = Config.GetCachedConfig();
+                        if (config?.AutoStart != null)
+                        {
+                            Console.WriteLine($"配置状态: {(config.AutoStart.Enabled ? "启用" : "禁用")}");
+                            Console.WriteLine($"配置模式: {config.AutoStart.Mode}");
+                            Console.WriteLine($"最小化到托盘: {config.AutoStart.MinimizeToTray}");
+                        }
+                        return;
+
                     case "--help":
                     case "-h":
                         ShowHelp();
@@ -83,6 +120,66 @@ namespace WindowsEventLogMonitor
         {
             ApplicationConfiguration.Initialize();
             Application.Run(new MainForm());
+        }
+
+        /// <summary>
+        /// 以 GUI 模式启动（自启动模式）
+        /// </summary>
+        private static void RunAsGuiWithAutoStart(string[] args)
+        {
+            // 检查是否是最小化启动
+            bool minimizeToTray = args.Contains("--minimize") || args.Contains("-m");
+
+            ApplicationConfiguration.Initialize();
+
+            var form = new MainForm();
+
+            if (minimizeToTray)
+            {
+                // 隐藏窗口，只显示托盘图标
+                form.WindowState = FormWindowState.Minimized;
+                form.ShowInTaskbar = false;
+
+                // 使用 BeginInvoke 在窗体加载后最小化到托盘
+                form.BeginInvoke(new Action(() =>
+                {
+                    form.Hide();
+                    // 触发 SQL Server 监控自动启动（如果配置启用）
+                    // form.StartAutoMonitoring(); // Task 11 中实现
+                }));
+            }
+
+            Application.Run(form);
+        }
+
+        /// <summary>
+        /// 设置自启动模式
+        /// </summary>
+        private static void SetAutoStartMode(string mode, bool minimizeToTray)
+        {
+            var service = new Services.AutoStartService();
+            bool success;
+
+            switch (mode)
+            {
+                case "gui":
+                    success = service.EnableGuiAutoStart(minimizeToTray);
+                    Console.WriteLine(success
+                        ? $"GUI 模式自启动已启用{(minimizeToTray ? "（最小化到托盘）" : "")}"
+                        : "GUI 模式自启动启用失败");
+                    break;
+
+                case "service":
+                    success = service.EnableServiceAutoStart();
+                    Console.WriteLine(success
+                        ? "服务模式自启动已启用"
+                        : "服务模式自启动启用失败（请确认服务已安装）");
+                    break;
+
+                default:
+                    Console.WriteLine("无效的模式。可用模式: gui, service");
+                    break;
+            }
         }
 
         /// <summary>
@@ -142,6 +239,10 @@ namespace WindowsEventLogMonitor
             Console.WriteLine("  WindowsEventLogMonitor.exe test-logid               - 测试日志ID提取功能");
             Console.WriteLine("  WindowsEventLogMonitor.exe analyze-duplicates [type] - 分析重复的日志记录");
             Console.WriteLine("  WindowsEventLogMonitor.exe cleanup-duplicates [type] - 清理重复的日志记录");
+            Console.WriteLine("  WindowsEventLogMonitor.exe set-autostart-mode gui [--minimize]  - 设置GUI模式自启动");
+            Console.WriteLine("  WindowsEventLogMonitor.exe set-autostart-mode service          - 设置服务模式自启动");
+            Console.WriteLine("  WindowsEventLogMonitor.exe disable-autostart                   - 禁用自启动");
+            Console.WriteLine("  WindowsEventLogMonitor.exe query-autostart                     - 查询自启动状态");
             Console.WriteLine("  WindowsEventLogMonitor.exe --help                   - 显示此帮助信息");
             Console.WriteLine("");
             Console.WriteLine("参数说明:");

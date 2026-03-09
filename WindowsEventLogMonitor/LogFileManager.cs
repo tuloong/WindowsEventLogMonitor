@@ -88,29 +88,12 @@ namespace WindowsEventLogMonitor
 
         /// <summary>
         /// 从指定类型的所有日志文件中加载已推送的日志ID
-        /// 由于已禁用.ini文件记录，此方法现在返回空集合
+        /// 注意：现使用内存去重，此方法保留仅用于兼容性
         /// </summary>
-        /// <param name="logType">日志类型</param>
-        /// <param name="daysBack">向前查找的天数，默认3天</param>
-        /// <returns>已推送的日志ID集合</returns>
         public static HashSet<string> LoadPushedLogIds(string logType, int daysBack = 3)
         {
-            // 由于已禁用.ini文件记录，返回空集合
-            // 这将导致可能重复推送某些日志，但避免程序出错
-            var pushedLogIds = new HashSet<string>();
-
-            try
-            {
-                // 仍然检查旧的日志文件格式（兼容性）
-                CheckLegacyLogFiles(logType, pushedLogIds);
-            }
-            catch (Exception ex)
-            {
-                // 记录调试信息以便诊断问题
-                Debug.WriteLine($"[LogFileManager] 加载推送日志ID时发生异常: {ex.Message}");
-            }
-
-            return pushedLogIds;
+            // 已改用内存去重存储，返回空集合
+            return new HashSet<string>();
         }
 
         /// <summary>

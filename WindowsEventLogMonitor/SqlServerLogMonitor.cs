@@ -23,6 +23,9 @@ public class SqlServerLogMonitor : IDisposable
     // 缓存最新收集的日志，供UI显示使用
     private readonly List<SqlServerLogEntry> recentLogs = new List<SqlServerLogEntry>();
     private readonly object recentLogsLock = new object();
+    
+    // 可配置的缓存限制
+    private int maxCacheLogs = 1000;
 
     // 启动时间管理
     private DateTime currentStartupTime;
@@ -122,6 +125,19 @@ public class SqlServerLogMonitor : IDisposable
             recentLogs.Clear();
         }
     }
+
+    /// <summary>
+    /// 设置缓存最大日志数量
+    /// </summary>
+    public void SetMaxCacheLogs(int maxLogs)
+    {
+        maxCacheLogs = Math.Max(100, Math.Min(maxLogs, 10000)); // 限制在100-10000之间
+    }
+
+    /// <summary>
+    /// 获取当前缓存最大日志数量
+    /// </summary>
+    public int GetMaxCacheLogs() => maxCacheLogs;
 
     /// <summary>
     /// 获取当前启动时间
@@ -530,17 +546,17 @@ public class SqlServerLogMonitor : IDisposable
         {
             // 先限制新日志数量，避免一次性插入过多导致内存压力
             var trimmedNewLogs = newLogs.OrderByDescending(log => log.TimeGenerated)
-                .Take(200)
+                .Take(maxCacheLogs)
                 .ToList();
 
             // 将新日志添加到缓存前面（最新的在前面）
             recentLogs.InsertRange(0, trimmedNewLogs);
 
-            // 只保留最近200条日志，避免内存过大
-            if (recentLogs.Count > 200)
+            // 只保留最近N条日志，避免内存过大
+            if (recentLogs.Count > maxCacheLogs)
             {
-                var excessCount = recentLogs.Count - 200;
-                recentLogs.RemoveRange(200, excessCount);
+                var excessCount = recentLogs.Count - maxCacheLogs;
+                recentLogs.RemoveRange(maxCacheLogs, excessCount);
             }
         }
     }

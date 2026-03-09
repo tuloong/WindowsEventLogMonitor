@@ -97,6 +97,9 @@ namespace WindowsEventLogMonitor
             numericUpDownBatchSize.Value = config.SqlServerMonitoring.BatchSize;
             checkBoxIncludeMSSQLSERVER.Checked = config.SqlServerMonitoring.IncludeMSSQLSERVER;
             checkBoxIncludeWindowsAuth.Checked = config.SqlServerMonitoring.IncludeWindowsAuth;
+            
+            // 应用缓存限制配置到日志监控器
+            sqlServerLogMonitor.SetMaxCacheLogs(config.SqlServerMonitoring.MaxCacheLogs);
         }
 
         private void InitializeTimers()
@@ -435,8 +438,11 @@ namespace WindowsEventLogMonitor
 
             try
             {
+                // 使用配置的最大显示数量
+                var maxDisplayLogs = config?.SqlServerMonitoring?.MaxDisplayLogs ?? 500;
+                
                 // 异步获取最新日志数据
-                var recentLogs = await Task.Run(() => sqlServerLogMonitor.GetRecentLogs(100));
+                var recentLogs = await Task.Run(() => sqlServerLogMonitor.GetRecentLogs(maxDisplayLogs));
 
                 LogMessage($"从缓存中获取到 {recentLogs.Count} 条日志");
 
@@ -465,8 +471,8 @@ namespace WindowsEventLogMonitor
                     }
                 }
 
-                // 更新日志数量显示
-                lblLogCount.Text = $"日志数量: {recentLogs.Count}";
+                // 更新日志数量显示（显示当前数量/最大限制）
+                lblLogCount.Text = $"日志数量: {recentLogs.Count}/{maxDisplayLogs}";
 
                 // 自动滚动到最新记录
                 if (dataGridViewSQLServerLogs.Rows.Count > 0)

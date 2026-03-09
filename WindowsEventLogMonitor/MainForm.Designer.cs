@@ -93,6 +93,7 @@
         private ContextMenuStrip contextMenuStrip;
 
         // 自启动控件
+        private GroupBox groupBoxAutoStart;
         private CheckBox checkBoxEnableAutoStart;
         private RadioButton radioButtonGuiMode;
         private CheckBox checkBoxMinimizeToTray;
@@ -598,6 +599,12 @@
             mainPanel.SetColumnSpan(buttonPanel, 2);
 
             scrollPanel.Controls.Add(mainPanel);
+
+            // 初始化并添加自启动设置控件（在 mainPanel 之后添加）
+            InitializeAutoStartControls();
+            groupBoxAutoStart.Dock = DockStyle.Top;
+            scrollPanel.Controls.Add(groupBoxAutoStart);
+
             tabPageConfiguration.Controls.Add(scrollPanel);
         }
 
@@ -1064,7 +1071,7 @@
         private void InitializeAutoStartControls()
         {
             // 自启动设置分组框
-            var groupBoxAutoStart = new GroupBox
+            groupBoxAutoStart = new GroupBox
             {
                 Text = "自启动设置",
                 Location = new Point(20, 400),
@@ -1127,7 +1134,11 @@
                 lblServiceHint
             });
 
-            tabPageConfiguration.Controls.Add(groupBoxAutoStart);
+            // 注意：需要在 InitializeConfigurationTab 中将此控件添加到 mainPanel
+            // 这里使用 DockStyle.Top 让它显示在配置页面底部
+            groupBoxAutoStart.Dock = DockStyle.Top;
+            groupBoxAutoStart.Height = 150;
+            groupBoxAutoStart.Margin = new Padding(5, 10, 5, 10);
         }
 
         #endregion

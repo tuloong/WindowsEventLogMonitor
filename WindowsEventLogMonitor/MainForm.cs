@@ -12,6 +12,7 @@ using System.Text.RegularExpressions;
 using System.ServiceProcess;
 using System.Drawing;
 using System.Threading;
+using WindowsEventLogMonitor.Services;
 
 namespace WindowsEventLogMonitor
 {
@@ -111,6 +112,33 @@ namespace WindowsEventLogMonitor
 
             // 更新状态显示
             UpdateAutoRefreshStatusDisplay();
+
+            // 加载自启动配置
+            if (config.AutoStart != null)
+            {
+                checkBoxEnableAutoStart.Checked = config.AutoStart.Enabled;
+
+                if (config.AutoStart.Mode == AutoStartMode.Gui)
+                {
+                    radioButtonGuiMode.Checked = true;
+                }
+                else if (config.AutoStart.Mode == AutoStartMode.Service)
+                {
+                    radioButtonServiceMode.Checked = true;
+                }
+
+                checkBoxMinimizeToTray.Checked = config.AutoStart.MinimizeToTray;
+            }
+
+            // 检查实际注册表/服务状态是否与配置一致
+            var autoStartService = new Services.AutoStartService();
+            var actualStatus = autoStartService.GetStatus();
+            if (actualStatus == Services.AutoStartStatus.Disabled && config.AutoStart.Enabled)
+            {
+                // 配置启用但实际未启用，提示用户
+                MessageBox.Show("自启动配置与实际状态不一致，请重新保存配置。",
+                    "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
         }
 
         /// <summary>
@@ -585,6 +613,46 @@ namespace WindowsEventLogMonitor
                 config.SqlServerMonitoring.IncludeWindowsAuth = checkBoxIncludeWindowsAuth.Checked;
 
                 Config.SaveConfig(config);
+
+                // 保存自启动配置
+                config.AutoStart.Enabled = checkBoxEnableAutoStart.Checked;
+
+                if (radioButtonGuiMode.Checked)
+                {
+                    config.AutoStart.Mode = AutoStartMode.Gui;
+                }
+                else if (radioButtonServiceMode.Checked)
+                {
+                    config.AutoStart.Mode = AutoStartMode.Service;
+                }
+
+                config.AutoStart.MinimizeToTray = checkBoxMinimizeToTray.Checked;
+
+                // 应用自启动设置
+                var autoStartService = new Services.AutoStartService();
+                bool success;
+
+                if (config.AutoStart.Enabled)
+                {
+                    if (config.AutoStart.Mode == AutoStartMode.Gui)
+                    {
+                        success = autoStartService.EnableGuiAutoStart(config.AutoStart.MinimizeToTray);
+                    }
+                    else
+                    {
+                        success = autoStartService.EnableServiceAutoStart();
+                    }
+                }
+                else
+                {
+                    success = autoStartService.DisableAutoStart();
+                }
+
+                if (!success)
+                {
+                    MessageBox.Show("自启动设置保存失败，请检查权限或以管理员身份运行。",
+                        "警告", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
 
                 MessageBox.Show("配置已保存", "成功", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 LogMessage("配置已保存");
@@ -1229,12 +1297,29 @@ namespace WindowsEventLogMonitor
 
         private void CheckBoxEnableAutoStart_CheckedChanged(object sender, EventArgs e)
         {
-            // Task 9: 实现自启动启用/禁用逻辑
+            var enabled = checkBoxEnableAutoStart.Checked;
+            radioButtonGuiMode.Enabled = enabled;
+            radioButtonServiceMode.Enabled = enabled;
+
+            if (enabled)
+            {
+                checkBoxMinimizeToTray.Enabled = radioButtonGuiMode.Checked;
+
+                // 默认选中 GUI 模式
+                if (!radioButtonGuiMode.Checked && !radioButtonServiceMode.Checked)
+                {
+                    radioButtonGuiMode.Checked = true;
+                }
+            }
+            else
+            {
+                checkBoxMinimizeToTray.Enabled = false;
+            }
         }
 
         private void RadioButtonGuiMode_CheckedChanged(object sender, EventArgs e)
         {
-            // Task 9: 实现GUI模式切换逻辑
+            checkBoxMinimizeToTray.Enabled = radioButtonGuiMode.Checked;
         }
 
         #endregion

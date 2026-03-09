@@ -32,10 +32,31 @@ public class SqlServerLogService : ServiceBase
     {
         try
         {
+            // 注意：OnStart 必须快速返回，否则 SCM 会认为服务无响应
+            // 所有初始化工作都在后台线程中完成
+            WriteLog("SQL Server日志监控服务正在启动...");
+
+            // 在后台线程中完成初始化，避免阻塞 OnStart
+            Task.Run(() => InitializeAndStartMonitoring());
+
+            WriteLog("SQL Server日志监控服务启动中...");
+        }
+        catch (Exception ex)
+        {
+            WriteLog($"服务启动失败: {ex.Message}");
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 初始化并启动监控（在后台线程中执行）
+    /// </summary>
+    private void InitializeAndStartMonitoring()
+    {
+        try
+        {
             // 初始化日志文件管理器
             LogFileManager.Initialize();
-
-            WriteLog("SQL Server日志监控服务正在启动...");
 
             // 加载配置
             config = Config.GetCachedConfig() ?? new Config();
@@ -58,8 +79,9 @@ public class SqlServerLogService : ServiceBase
         }
         catch (Exception ex)
         {
-            WriteLog($"服务启动失败: {ex.Message}");
-            throw;
+            WriteLog($"服务初始化失败: {ex.Message}");
+            // 服务初始化失败，但 OnStart 已经返回，记录错误并退出
+            Environment.Exit(1);
         }
     }
 

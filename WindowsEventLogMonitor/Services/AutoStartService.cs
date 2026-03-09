@@ -59,8 +59,8 @@ namespace WindowsEventLogMonitor.Services
                 // 先禁用服务模式（如果之前设置了）
                 DisableServiceAutoStart();
 
-                // 获取可执行文件路径
-                var exePath = System.Reflection.Assembly.GetExecutingAssembly().Location;
+                // 获取可执行文件路径（使用主模块路径确保获取 .exe 而非 .dll）
+                var exePath = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
                 if (string.IsNullOrEmpty(exePath))
                 {
                     exePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory,

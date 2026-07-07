@@ -6,15 +6,21 @@ namespace WindowsEventLogMonitor
     /// <summary>
     /// 内存中去重存储 - 使用HashSet存储已推送的日志ID
     /// 服务重启后数据会丢失，允许少量重复推送
+    /// 带容量上限的 FIFO 淘汰策略，避免长期运行内存无限增长
     /// </summary>
     public class InMemoryDeduplicationStore
     {
+        private const int DefaultCapacity = 10000;
         private readonly HashSet<string> _pushedLogIds;
+        private readonly Queue<string> _insertionOrder;
         private readonly object _lock;
+        private readonly int _capacity;
 
-        public InMemoryDeduplicationStore()
+        public InMemoryDeduplicationStore(int capacity = DefaultCapacity)
         {
+            _capacity = Math.Max(1, capacity);
             _pushedLogIds = new HashSet<string>();
+            _insertionOrder = new Queue<string>();
             _lock = new object();
         }
 
@@ -30,7 +36,18 @@ namespace WindowsEventLogMonitor
 
             lock (_lock)
             {
-                return _pushedLogIds.Add(logId);
+                if (!_pushedLogIds.Add(logId))
+                    return false;
+
+                _insertionOrder.Enqueue(logId);
+
+                // 超过容量时按 FIFO 淘汰最早的记录
+                while (_pushedLogIds.Count > _capacity && _insertionOrder.Count > 0)
+                {
+                    var oldest = _insertionOrder.Dequeue();
+                    _pushedLogIds.Remove(oldest);
+                }
+                return true;
             }
         }
 
@@ -56,6 +73,7 @@ namespace WindowsEventLogMonitor
             lock (_lock)
             {
                 _pushedLogIds.Clear();
+                _insertionOrder.Clear();
             }
         }
 
@@ -72,5 +90,10 @@ namespace WindowsEventLogMonitor
                 }
             }
         }
+
+        /// <summary>
+        /// 容量上限
+        /// </summary>
+        public int Capacity => _capacity;
     }
 }

@@ -39,6 +39,10 @@ namespace WindowsEventLogMonitor
         private int uploadErrors = 0;
         private DateTime lastUploadTime = DateTime.MinValue;
         private List<ErrorInfo> recentErrors = new List<ErrorInfo>();
+        private readonly object recentErrorsLock = new object();
+
+        // 通用日志去重存储（替代已禁用的 LogFileManager 持久化去重）
+        private readonly InMemoryDeduplicationStore generalLogDedupStore = new InMemoryDeduplicationStore();
 
         public MainForm()
         {
@@ -344,43 +348,42 @@ namespace WindowsEventLogMonitor
             });
 
             // 短暂延迟后更新状态为运行中，并立即收集一次历史日志
-            _ = Task.Delay(1000).ContinueWith(async _ =>
+            _ = Task.Run(async () =>
             {
-                if (!sqlServerMonitoringCancellationTokenSource.Token.IsCancellationRequested)
+                try
                 {
-                    this.Invoke(new Action(() =>
-                    {
-                        lblMonitorStatus.Text = "状态: 运行中";
-                        lblMonitorStatus.ForeColor = Color.Green;
-                        LogMessage("SQL Server监控已启动");
-                    }));
+                    await Task.Delay(1000);
 
-                    // 启动后立即收集一次历史日志
-                    try
-                    {
-                        LogMessage("正在收集历史SQL Server日志...");
-                        var count = await sqlServerLogMonitor.CollectAvailableLogsAsync(1); // 收集最近1分钟的日志
-
-                        this.Invoke(new Action(async () =>
-                        {
-                            await UpdateSQLServerLogDisplay();
-                            if (count > 0)
-                            {
-                                LogMessage($"启动时收集到 {count} 条历史日志");
-                            }
-                            else
-                            {
-                                LogMessage("启动时没有找到历史日志");
-                            }
-                        }));
-                    }
-                    catch (Exception ex)
+                    if (!sqlServerMonitoringCancellationTokenSource.Token.IsCancellationRequested)
                     {
                         this.Invoke(new Action(() =>
                         {
-                            LogMessage($"收集历史日志失败: {ex.Message}");
+                            lblMonitorStatus.Text = "状态: 运行中";
+                            lblMonitorStatus.ForeColor = Color.Green;
+                            LogMessage("SQL Server监控已启动");
                         }));
+
+                        // 启动后立即收集一次历史日志
+                        LogMessage("正在收集历史SQL Server日志...");
+                        var count = await sqlServerLogMonitor.CollectAvailableLogsAsync(1); // 收集最近1分钟的日志
+
+                        // 更新显示（自行处理线程切换）
+                        await UpdateSQLServerLogDisplay();
+
+                        if (count > 0)
+                        {
+                            this.Invoke(new Action(() => LogMessage($"启动时收集到 {count} 条历史日志")));
+                        }
+                        else
+                        {
+                            this.Invoke(new Action(() => LogMessage("启动时没有找到历史日志")));
+                        }
                     }
+                }
+                catch (Exception ex)
+                {
+                    try { this.Invoke(new Action(() => LogMessage($"收集历史日志失败: {ex.Message}"))); }
+                    catch { /* 窗体可能已关闭 */ }
                 }
             });
         }
@@ -394,14 +397,19 @@ namespace WindowsEventLogMonitor
             {
                 try
                 {
-                    await sqlServerLogMonitor.CollectAndPushSQLServerLogsAsync(config.ApiUrl);
+                    // 收集并推送，返回 (采集条数, 推送成功条数)
+                    var (collected, pushed) = await sqlServerLogMonitor.CollectAndPushSQLServerLogsAsync(config.ApiUrl);
 
                     // 更新日志显示
                     await UpdateSQLServerLogDisplay();
 
-                    totalLogsProcessed++;
-                    logsUploaded++;
-                    lastUploadTime = DateTime.Now;
+                    // 按真实日志条数累加（而非轮询次数）
+                    totalLogsProcessed += collected;
+                    logsUploaded += pushed;
+                    if (collected > 0)
+                    {
+                        lastUploadTime = DateTime.Now;
+                    }
 
                     await Task.Delay(TimeSpan.FromSeconds(intervalSeconds), cancellationToken);
                 }
@@ -430,54 +438,24 @@ namespace WindowsEventLogMonitor
 
         private async Task UpdateSQLServerLogDisplay()
         {
-            if (dataGridViewSQLServerLogs.InvokeRequired)
-            {
-                dataGridViewSQLServerLogs.Invoke(new Action(async () => await UpdateSQLServerLogDisplay()));
-                return;
-            }
-
             try
             {
                 // 使用配置的最大显示数量
                 var maxDisplayLogs = config?.SqlServerMonitoring?.MaxDisplayLogs ?? 500;
-                
-                // 异步获取最新日志数据
+
+                // 异步获取最新日志数据（可在任意线程执行）
                 var recentLogs = await Task.Run(() => sqlServerLogMonitor.GetRecentLogs(maxDisplayLogs));
 
                 LogMessage($"从缓存中获取到 {recentLogs.Count} 条日志");
 
-                // 更新DataGridView
-                dataGridViewSQLServerLogs.Rows.Clear();
-
-                foreach (var log in recentLogs)
+                // DataGridView 更新必须在 UI 线程同步执行
+                if (dataGridViewSQLServerLogs.InvokeRequired)
                 {
-                    var row = dataGridViewSQLServerLogs.Rows.Add();
-                    dataGridViewSQLServerLogs.Rows[row].Cells["TimeGenerated"].Value = log.TimeGenerated.ToString("yyyy-MM-dd HH:mm:ss");
-                    dataGridViewSQLServerLogs.Rows[row].Cells["LogType"].Value = log.LogType;
-                    dataGridViewSQLServerLogs.Rows[row].Cells["UserName"].Value = log.UserName;
-                    dataGridViewSQLServerLogs.Rows[row].Cells["ClientIP"].Value = log.ClientIP;
-                    dataGridViewSQLServerLogs.Rows[row].Cells["DatabaseName"].Value = log.DatabaseName;
-                    dataGridViewSQLServerLogs.Rows[row].Cells["EventId"].Value = log.EventId.ToString();
-                    dataGridViewSQLServerLogs.Rows[row].Cells["Message"].Value = log.Message;
-
-                    // 根据日志类型设置行颜色
-                    if (log.LogType.Contains("失败"))
-                    {
-                        dataGridViewSQLServerLogs.Rows[row].DefaultCellStyle.BackColor = Color.FromArgb(255, 240, 240); // 淡红色
-                    }
-                    else if (log.LogType.Contains("成功"))
-                    {
-                        dataGridViewSQLServerLogs.Rows[row].DefaultCellStyle.BackColor = Color.FromArgb(240, 255, 240); // 淡绿色
-                    }
+                    dataGridViewSQLServerLogs.Invoke(new Action(() => RenderSqlLogsToGrid(recentLogs, maxDisplayLogs)));
                 }
-
-                // 更新日志数量显示（显示当前数量/最大限制）
-                lblLogCount.Text = $"日志数量: {recentLogs.Count}/{maxDisplayLogs}";
-
-                // 自动滚动到最新记录
-                if (dataGridViewSQLServerLogs.Rows.Count > 0)
+                else
                 {
-                    dataGridViewSQLServerLogs.FirstDisplayedScrollingRowIndex = 0;
+                    RenderSqlLogsToGrid(recentLogs, maxDisplayLogs);
                 }
 
                 LogMessage($"已更新SQL Server日志显示，共 {recentLogs.Count} 条记录");
@@ -490,7 +468,46 @@ namespace WindowsEventLogMonitor
         }
 
         /// <summary>
-        /// 自动刷新SQL Server日志显示
+        /// 在 UI 线程上将日志渲染到 DataGridView（同步，无 async void）
+        /// </summary>
+        private void RenderSqlLogsToGrid(List<SqlServerLogEntry> recentLogs, int maxDisplayLogs)
+        {
+            dataGridViewSQLServerLogs.Rows.Clear();
+
+            foreach (var log in recentLogs)
+            {
+                var row = dataGridViewSQLServerLogs.Rows.Add();
+                dataGridViewSQLServerLogs.Rows[row].Cells["TimeGenerated"].Value = log.TimeGenerated.ToString("yyyy-MM-dd HH:mm:ss");
+                dataGridViewSQLServerLogs.Rows[row].Cells["LogType"].Value = log.LogType;
+                dataGridViewSQLServerLogs.Rows[row].Cells["UserName"].Value = log.UserName;
+                dataGridViewSQLServerLogs.Rows[row].Cells["ClientIP"].Value = log.ClientIP;
+                dataGridViewSQLServerLogs.Rows[row].Cells["DatabaseName"].Value = log.DatabaseName;
+                dataGridViewSQLServerLogs.Rows[row].Cells["EventId"].Value = log.EventId.ToString();
+                dataGridViewSQLServerLogs.Rows[row].Cells["Message"].Value = log.Message;
+
+                // 根据日志类型设置行颜色
+                if (log.LogType.Contains("失败"))
+                {
+                    dataGridViewSQLServerLogs.Rows[row].DefaultCellStyle.BackColor = Color.FromArgb(255, 240, 240); // 淡红色
+                }
+                else if (log.LogType.Contains("成功"))
+                {
+                    dataGridViewSQLServerLogs.Rows[row].DefaultCellStyle.BackColor = Color.FromArgb(240, 255, 240); // 淡绿色
+                }
+            }
+
+            // 更新日志数量显示（显示当前数量/最大限制）
+            lblLogCount.Text = $"日志数量: {recentLogs.Count}/{maxDisplayLogs}";
+
+            // 自动滚动到最新记录
+            if (dataGridViewSQLServerLogs.Rows.Count > 0)
+            {
+                dataGridViewSQLServerLogs.FirstDisplayedScrollingRowIndex = 0;
+            }
+        }
+
+        /// <summary>
+        /// 自动刷新SQL Server日志显示（定时器回调，async void 仅在此入口点使用）
         /// </summary>
         private async void AutoRefreshSQLServerLogs()
         {
@@ -500,17 +517,7 @@ namespace WindowsEventLogMonitor
 
             try
             {
-                // 在UI线程上更新显示
-                if (this.InvokeRequired)
-                {
-                    this.Invoke(new Action(() =>
-                    {
-                        Task.Run(async () => await UpdateSQLServerLogDisplay());
-                    }));
-                    return;
-                }
-
-                // 更新显示（不收集新日志，只更新UI显示）
+                // UpdateSQLServerLogDisplay 内部自行处理线程切换，无需在此 Invoke
                 await UpdateSQLServerLogDisplay();
             }
             catch (Exception ex)
@@ -582,10 +589,11 @@ namespace WindowsEventLogMonitor
             try
             {
                 var logs = eventLogReader.FilterEventLogEntries(selectedSource, string.Empty);
-                var pushedLogIds = LoadPushedLogIds();
-                var newLogs = logs.Where(log => !pushedLogIds.Contains(GenerateUniqueKey(log))).ToList();
 
-                LogMessage($"从 {selectedSource} 加载了 {logs.Count} 条日志，其中 {pushedLogIds.Count} 条已推送，{newLogs.Count} 条新日志");
+                // 使用内存去重存储过滤已推送日志（替代已禁用的 LogFileManager.LoadPushedLogIds）
+                var newLogs = logs.Where(log => !generalLogDedupStore.Contains(GenerateUniqueKey(log))).ToList();
+
+                LogMessage($"从 {selectedSource} 加载了 {logs.Count} 条日志，其中 {logs.Count - newLogs.Count} 条已推送，{newLogs.Count} 条新日志");
 
                 if (newLogs.Count == 0)
                 {
@@ -596,14 +604,13 @@ namespace WindowsEventLogMonitor
                 var jsonData = jsonService.ConvertToJSON(newLogs);
                 await httpService.PushLogsToAPIAsync(jsonData, config.ApiUrl);
 
-                // 记录推送信息
-                var logTime = DateTime.Now;
+                // 推送成功后记录到去重存储
                 foreach (var log in newLogs)
                 {
-                    var logEntry = $"Log ID: {GenerateUniqueKey(log)}, Generated at: {log.TimeGenerated}, Pushed at: {logTime}";
-                    LogFileManager.WriteLogEntry(LogType, logEntry);
+                    generalLogDedupStore.TryAdd(GenerateUniqueKey(log));
                 }
 
+                totalLogsProcessed += newLogs.Count;
                 logsUploaded += newLogs.Count;
                 lastUploadTime = DateTime.Now;
 
@@ -653,7 +660,8 @@ namespace WindowsEventLogMonitor
 
                 Config.SaveConfig(config);
 
-                // 应用自启动设置
+                // 配置变更后刷新 HttpService 的 Header/Timeout
+                httpService.RefreshConfig();
                 var autoStartService = new Services.AutoStartService();
                 bool success;
                 var selectedMethod = (Services.AutoStartMethod)comboBoxAutoStartMethod.SelectedIndex;
@@ -737,7 +745,10 @@ namespace WindowsEventLogMonitor
 
         private void BtnClearErrors_Click(object sender, EventArgs e)
         {
-            recentErrors.Clear();
+            lock (recentErrorsLock)
+            {
+                recentErrors.Clear();
+            }
             dataGridViewRecentErrors.Rows.Clear();
             uploadErrors = 0;
             UpdateStatusDisplay();
@@ -785,18 +796,21 @@ namespace WindowsEventLogMonitor
                 Details = details
             };
 
-            recentErrors.Insert(0, errorInfo);
-
-            // 只保留最近50个错误
-            if (recentErrors.Count > 50)
+            lock (recentErrorsLock)
             {
-                recentErrors.RemoveRange(50, recentErrors.Count - 50);
+                recentErrors.Insert(0, errorInfo);
+
+                // 只保留最近50个错误
+                if (recentErrors.Count > 50)
+                {
+                    recentErrors.RemoveRange(50, recentErrors.Count - 50);
+                }
             }
 
             // 更新错误显示
             if (InvokeRequired)
             {
-                Invoke(new Action(() => UpdateErrorDisplay()));
+                Invoke(new Action(UpdateErrorDisplay));
             }
             else
             {
@@ -807,7 +821,13 @@ namespace WindowsEventLogMonitor
         private void UpdateErrorDisplay()
         {
             dataGridViewRecentErrors.Rows.Clear();
-            foreach (var error in recentErrors.Take(20)) // 只显示最近20个错误
+            List<ErrorInfo> snapshot;
+            lock (recentErrorsLock)
+            {
+                // 复制快照避免遍历时被修改
+                snapshot = recentErrors.Take(20).ToList();
+            }
+            foreach (var error in snapshot)
             {
                 dataGridViewRecentErrors.Rows.Add(
                     error.Time.ToString("yyyy-MM-dd HH:mm:ss"),
@@ -955,11 +975,10 @@ namespace WindowsEventLogMonitor
                 try
                 {
                     var logEntries = eventLogReader.FilterEventLogEntries(selectedSource, string.Empty);
-                    var pushedLogIds = LoadPushedLogIds();
 
-                    var generatedTime = GetMaxGeneratedTime();
+                    // 使用内存去重存储过滤已推送日志
                     var newLogs = logEntries
-                        .Where(log => !pushedLogIds.Contains(GenerateUniqueKey(log)) && log.TimeGenerated > generatedTime)
+                        .Where(log => !generalLogDedupStore.Contains(GenerateUniqueKey(log)))
                         .ToList();
 
                     if (newLogs.Count > 0)
@@ -1036,23 +1055,12 @@ namespace WindowsEventLogMonitor
             var json = JsonConvert.SerializeObject(logs);
             await httpService.PushLogsToAPIAsync(json, config.ApiUrl);
 
-            var logTime = DateTime.Now;
-            var logEntryStrings = $"Log ID: {GenerateUniqueKey(logEntry)},Generated at: {logEntry.TimeGenerated},Pushed at: {logTime}";
-            await LogFileManager.WriteLogEntryAsync(LogType, logEntryStrings);
+            // 推送成功后记录到去重存储（替代已禁用的 LogFileManager.WriteLogEntryAsync）
+            generalLogDedupStore.TryAdd(GenerateUniqueKey(logEntry));
 
             totalLogsProcessed++;
             logsUploaded++;
             lastUploadTime = DateTime.Now;
-        }
-
-        private DateTime GetMaxGeneratedTime()
-        {
-            return LogFileManager.GetLastProcessedTime(LogType);
-        }
-
-        private HashSet<string> LoadPushedLogIds()
-        {
-            return LogFileManager.LoadPushedLogIds(LogType);
         }
 
         private string GenerateUniqueKey(EventLogEntry log)
@@ -1082,13 +1090,27 @@ namespace WindowsEventLogMonitor
             }
         }
 
-        private void ExitMenuItem_Click(object sender, EventArgs e)
+        private async void ExitMenuItem_Click(object sender, EventArgs e)
         {
             isMonitoring = false;
             isSQLServerMonitoring = false;
 
             // 停止SQL Server监控
             sqlServerMonitoringCancellationTokenSource?.Cancel();
+            sqlServerLogMonitor?.StopMonitoring();
+
+            // 等待后台监控任务结束（带超时，避免卡死退出）
+            if (sqlServerMonitoringTask != null)
+            {
+                try
+                {
+                    await Task.WhenAny(sqlServerMonitoringTask, Task.Delay(3000));
+                }
+                catch
+                {
+                    // 忽略退出时的异常
+                }
+            }
 
             // 清理定时器
             logCleanTimer?.Dispose();

@@ -12,12 +12,62 @@ internal class HttpService
     private static readonly HttpClient client = new HttpClient();
     private static readonly object initLock = new object();
     private static bool isInitialized = false;
-    private readonly Config config;
+    private Config config;
 
     public HttpService()
     {
         config = Config.GetCachedConfig() ?? new Config();
         ConfigureHttpClient();
+    }
+
+    /// <summary>
+    /// 配置变更后重新应用 Header/Timeout（解决配置不刷新问题）
+    /// </summary>
+    public void RefreshConfig()
+    {
+        config = Config.GetCachedConfig() ?? new Config();
+        lock (initLock)
+        {
+            // 重新应用超时
+            client.Timeout = TimeSpan.FromSeconds(config.Security.TimeoutSeconds);
+
+            // 重新应用 API 密钥
+            client.DefaultRequestHeaders.Remove("Authorization");
+            if (!string.IsNullOrEmpty(config.Security.ApiKey))
+            {
+                client.DefaultRequestHeaders.Add("Authorization", $"Bearer {config.Security.ApiKey}");
+            }
+
+            // 重新应用用户代理
+            client.DefaultRequestHeaders.Remove("User-Agent");
+            client.DefaultRequestHeaders.Add("User-Agent", "WindowsEventLogMonitor/1.0");
+
+            isInitialized = true;
+        }
+    }
+
+    /// <summary>
+    /// 根据 UseHttps 配置规范化 URL（强制将 http:// 升级为 https://）
+    /// </summary>
+    public static string NormalizeUrl(string apiUrl, bool useHttps)
+    {
+        if (string.IsNullOrEmpty(apiUrl))
+            return apiUrl;
+
+        if (useHttps && apiUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+        {
+            return "https://" + apiUrl.Substring(7);
+        }
+        return apiUrl;
+    }
+
+    /// <summary>
+    /// 使用当前配置规范化 URL
+    /// </summary>
+    private string NormalizeUrlWithConfig(string apiUrl)
+    {
+        var currentConfig = Config.GetCachedConfig() ?? config;
+        return NormalizeUrl(apiUrl, currentConfig.Security.UseHttps);
     }
 
     private void ConfigureHttpClient()
@@ -60,6 +110,7 @@ internal class HttpService
 
     public async Task PushLogsToAPIAsync(string jsonData, string apiUrl)
     {
+        apiUrl = NormalizeUrlWithConfig(apiUrl);
         if (config.RetryPolicy.EnableRetry)
         {
             await PushLogsWithRetryAsync(jsonData, apiUrl);
@@ -143,6 +194,7 @@ internal class HttpService
     {
         try
         {
+            apiUrl = NormalizeUrlWithConfig(apiUrl);
             // 构建 health 端点 URL
             var baseUrl = apiUrl.TrimEnd('/');
             // 如果 URL 以 /api/aa/ 开头，使用 /api/aa/health
@@ -166,6 +218,7 @@ internal class HttpService
     {
         try
         {
+            baseUrl = NormalizeUrlWithConfig(baseUrl);
             var statusUrl = $"{baseUrl.TrimEnd('/')}/status";
             var response = await client.GetAsync(statusUrl).ConfigureAwait(false);
 

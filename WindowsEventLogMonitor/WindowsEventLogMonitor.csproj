@@ -18,6 +18,9 @@
     <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="WindowsEventLogMonitor.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <None Update="config.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

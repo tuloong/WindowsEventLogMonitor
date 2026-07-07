@@ -1,19 +1,34 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Diagnostics.Eventing.Reader;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
 namespace WindowsEventLogMonitor;
 
+/// <summary>
+/// 事件日志条目数据传输对象（兼容 EventLogEntry 与 EventRecord 两种来源）
+/// </summary>
+public class EventLogItem
+{
+    public long InstanceId { get; set; }
+    public string Source { get; set; } = "";
+    public DateTime TimeGenerated { get; set; }
+    public string EntryType { get; set; } = "";
+    public string Message { get; set; } = "";
+}
+
 internal class EventLogReader : IDisposable
 {
     private readonly EventLog eventLog;
+    private readonly string logName;
     private bool disposed = false;
 
     public EventLogReader(string logName)
     {
+        this.logName = logName;
         eventLog = new EventLog(logName);
     }
 
@@ -139,5 +154,54 @@ internal class EventLogReader : IDisposable
         return eventLog.Entries.Cast<EventLogEntry>()
             .Where(entry => entry.Source == source && eventIds.Contains(entry.InstanceId))
             .ToList();
+    }
+
+    /// <summary>
+    /// 使用 XPath 结构化查询事件日志（高性能：由 Windows 内核侧完成过滤，避免全量遍历）
+    /// </summary>
+    /// <param name="xpathQuery">XPath 查询表达式，例如 *[System[Provider[@Name='MSSQLSERVER'] and (EventID=18453)]]</param>
+    /// <returns>匹配的事件条目列表</returns>
+    public List<EventLogItem> QueryEvents(string xpathQuery)
+    {
+        var results = new List<EventLogItem>();
+        try
+        {
+            var query = new EventLogQuery(logName, PathType.LogName, xpathQuery);
+            using var reader = new System.Diagnostics.Eventing.Reader.EventLogReader(query);
+            EventRecord? record;
+            while ((record = reader.ReadEvent()) != null)
+            {
+                using (record)
+                {
+                    results.Add(new EventLogItem
+                    {
+                        InstanceId = record.Id,
+                        Source = record.ProviderName ?? "",
+                        TimeGenerated = record.TimeCreated ?? DateTime.MinValue,
+                        EntryType = MapLevelToEntryType(record.Level),
+                        Message = record.FormatDescription() ?? ""
+                    });
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"查询事件日志失败 ({logName}): {ex.Message}");
+        }
+        return results;
+    }
+
+    /// <summary>
+    /// 将 EventRecord 的 Level 映射为 EventLogEntryType 风格的字符串
+    /// </summary>
+    private static string MapLevelToEntryType(byte? level)
+    {
+        return level switch
+        {
+            0 or 1 or 5 => "Error",
+            2 or 3 => "Warning",
+            4 => "Information",
+            _ => "Information"
+        };
     }
 }

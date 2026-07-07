@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using System.IO;
+using System.Text.RegularExpressions;
 using Newtonsoft.Json;
 
 namespace WindowsEventLogMonitor;
@@ -31,6 +32,32 @@ public class SqlServerLogMonitor : IDisposable
     private DateTime currentStartupTime;
     private DateTime lastProcessedTime;
     private readonly object startupTimeLock = new object();
+
+    // 预编译正则表达式（避免每次调用重新编译）
+    private static readonly Regex[] SqlUserNamePatterns =
+    {
+        new(@"Login name: '([^']+)'", RegexOptions.Compiled),
+        new(@"用户名: '([^']+)'", RegexOptions.Compiled),
+        new(@"User '([^']+)'", RegexOptions.Compiled),
+        new(@"用户 '([^']+)'", RegexOptions.Compiled)
+    };
+    private static readonly Regex IpAddressPattern = new(@"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b", RegexOptions.Compiled);
+    private static readonly Regex[] SqlDatabaseNamePatterns =
+    {
+        new(@"Database: '([^']+)'", RegexOptions.Compiled),
+        new(@"数据库: '([^']+)'", RegexOptions.Compiled),
+        new(@"database '([^']+)'", RegexOptions.Compiled)
+    };
+    private static readonly Regex[] WindowsUserNamePatterns =
+    {
+        new(@"Account Name:\s*([^\r\n\t]+)", RegexOptions.Compiled),
+        new(@"帐户名:\s*([^\r\n\t]+)", RegexOptions.Compiled)
+    };
+    private static readonly Regex[] WindowsClientIpPatterns =
+    {
+        new(@"Source Network Address:\s*([^\r\n\t]+)", RegexOptions.Compiled),
+        new(@"源网络地址:\s*([^\r\n\t]+)", RegexOptions.Compiled)
+    };
 
     public SqlServerLogMonitor()
     {
@@ -213,7 +240,8 @@ public class SqlServerLogMonitor : IDisposable
     /// <summary>
     /// 收集并推送SQL Server日志 - 按启动时间管理，避免重复
     /// </summary>
-    public async Task CollectAndPushSQLServerLogsAsync(string apiUrl)
+    /// <returns>(采集到的日志条数, 成功推送的日志条数)</returns>
+    public async Task<(int collected, int pushed)> CollectAndPushSQLServerLogsAsync(string apiUrl)
     {
         DateTime processingStartTime;
         DateTime currentLastProcessedTime;
@@ -230,50 +258,54 @@ public class SqlServerLogMonitor : IDisposable
         // 第一步：按当前启动时间开始，从缓存中加载日志
         var sqlServerLogs = await GetNewSQLServerLogsByTimeRangeAsync(currentLastProcessedTime, processingStartTime);
 
-        if (sqlServerLogs.Count > 0)
+        if (sqlServerLogs.Count == 0)
         {
-            Console.WriteLine($"收集到 {sqlServerLogs.Count} 条新的SQL Server日志 (已去重存储: {_dedupStore.Count} 条)");
+            Console.WriteLine("没有新的SQL Server日志需要推送");
+            return (0, 0);
+        }
 
-            // 第二步：加载完记录的日志 - 更新缓存供UI显示
-            UpdateRecentLogsCache(sqlServerLogs);
+        Console.WriteLine($"收集到 {sqlServerLogs.Count} 条新的SQL Server日志 (已去重存储: {_dedupStore.Count} 条)");
 
-            // 第三步：更新启动时间（在推送前更新，确保即使推送失败也不会重复处理）
+        // 第二步：加载完记录的日志 - 更新缓存供UI显示
+        UpdateRecentLogsCache(sqlServerLogs);
+
+        // 第三步：更新启动时间（在推送前更新，确保即使推送失败也不会重复处理）
+        lock (startupTimeLock)
+        {
+            lastProcessedTime = processingStartTime;
+        }
+        Console.WriteLine($"更新最后处理时间为: {processingStartTime:yyyy-MM-dd HH:mm:ss}");
+
+        // 第四步：推送日志
+        var config = Config.GetCachedConfig() ?? new Config();
+        int pushedCount = await ProcessLogsInBatchesAsync(sqlServerLogs, apiUrl, batchSize: config.SqlServerMonitoring.BatchSize);
+
+        if (pushedCount == sqlServerLogs.Count)
+        {
+            // 第五步：推送成功，日志处理完成
+            Console.WriteLine("推送成功，日志处理完成");
+            Console.WriteLine("准备下次处理周期...");
+        }
+        else if (pushedCount == 0)
+        {
+            // 推送全部失败，回滚最后处理时间
             lock (startupTimeLock)
             {
-                lastProcessedTime = processingStartTime;
+                lastProcessedTime = currentLastProcessedTime;
             }
-            Console.WriteLine($"更新最后处理时间为: {processingStartTime:yyyy-MM-dd HH:mm:ss}");
-
-            // 第四步：推送日志
-            var config = Config.GetCachedConfig() ?? new Config();
-            bool pushSuccess = await ProcessLogsInBatchesAsync(sqlServerLogs, apiUrl, batchSize: config.SqlServerMonitoring.BatchSize);
-
-            if (pushSuccess)
-            {
-                // 第五步：推送成功后清除已处理的日志缓存（保留最近日志用于UI显示）
-                Console.WriteLine("推送成功，日志处理完成");
-
-                // 第六步：重新按更新后的启动时间读取日志（为下次处理做准备）
-                Console.WriteLine("准备下次处理周期...");
-            }
-            else
-            {
-                // 推送失败，回滚最后处理时间
-                lock (startupTimeLock)
-                {
-                    lastProcessedTime = currentLastProcessedTime;
-                }
-                Console.WriteLine($"推送失败，回滚最后处理时间为: {currentLastProcessedTime:yyyy-MM-dd HH:mm:ss}");
-            }
+            Console.WriteLine($"推送失败，回滚最后处理时间为: {currentLastProcessedTime:yyyy-MM-dd HH:mm:ss}");
         }
         else
         {
-            Console.WriteLine("没有新的SQL Server日志需要推送");
+            // 部分成功：不回滚时间（已成功的批次已记入去重存储，下次不会重复推送）
+            Console.WriteLine($"部分推送成功: {pushedCount}/{sqlServerLogs.Count}");
         }
+
+        return (sqlServerLogs.Count, pushedCount);
     }
 
     /// <summary>
-    /// 按时间范围获取SQL Server日志
+    /// 按时间范围获取SQL Server日志（使用 XPath 结构化查询，避免全量遍历事件日志）
     /// </summary>
     private async Task<List<SqlServerLogEntry>> GetNewSQLServerLogsByTimeRangeAsync(DateTime startTime, DateTime endTime)
     {
@@ -281,13 +313,14 @@ public class SqlServerLogMonitor : IDisposable
 
         Console.WriteLine($"收集时间范围内的日志: {startTime:yyyy-MM-dd HH:mm:ss} 到 {endTime:yyyy-MM-dd HH:mm:ss}");
 
-        // 从Application日志收集MSSQLSERVER日志
+        // 从Application日志收集MSSQLSERVER日志（XPath 内核侧过滤，仅迭代命中记录）
         await Task.Run(() =>
         {
             try
             {
-                using var eventLogReader = new EventLogReader("Application");
-                var allMssqlLogs = eventLogReader.FilterEventLogEntries("MSSQLSERVER", string.Empty);
+                // XPath: Provider=MSSQLSERVER 且 EventID in (18453,18454,18456)
+                var xpath = "*[System[Provider[@Name='MSSQLSERVER'] and (EventID=18453 or EventID=18454 or EventID=18456)]]";
+                var allMssqlLogs = applicationLogReader.QueryEvents(xpath);
 
                 var mssqlLogs = allMssqlLogs
                     .Where(log => log.TimeGenerated >= startTime && log.TimeGenerated < endTime)
@@ -312,7 +345,7 @@ public class SqlServerLogMonitor : IDisposable
                         TimeGenerated = log.TimeGenerated,
                         EventId = (int)log.InstanceId,
                         Source = log.Source,
-                        EntryType = log.EntryType.ToString(),
+                        EntryType = log.EntryType,
                         Message = log.Message,
                         LogType = GetLogType(log.InstanceId),
                         UserName = ExtractUserNameFromMessage(log.Message),
@@ -327,17 +360,19 @@ public class SqlServerLogMonitor : IDisposable
             }
         });
 
-        // 从Security日志收集Windows身份验证日志
+        // 从Security日志收集Windows身份验证日志（XPath 内核侧过滤）
         try
         {
             await Task.Run(() =>
             {
                 try
                 {
-                    var authLogs = securityLogReader.FilterByEventIds("Microsoft-Windows-Security-Auditing", 4624, 4625)
+                    // XPath: Provider=Microsoft-Windows-Security-Auditing 且 EventID in (4624,4625)
+                    var xpath = "*[System[Provider[@Name='Microsoft-Windows-Security-Auditing'] and (EventID=4624 or EventID=4625)]]";
+                    var authLogs = securityLogReader.QueryEvents(xpath)
                         .Where(log => log.TimeGenerated >= startTime &&
                                      log.TimeGenerated < endTime &&
-                                     log.Message != null &&
+                                     !string.IsNullOrEmpty(log.Message) &&
                                      log.Message.Contains("SQL", StringComparison.OrdinalIgnoreCase))
                         .ToList();
 
@@ -360,7 +395,7 @@ public class SqlServerLogMonitor : IDisposable
                             TimeGenerated = log.TimeGenerated,
                             EventId = (int)log.InstanceId,
                             Source = log.Source,
-                            EntryType = log.EntryType.ToString(),
+                            EntryType = log.EntryType,
                             Message = log.Message,
                             LogType = log.InstanceId == 4624 ? "Windows登录成功" : "Windows登录失败",
                             UserName = ExtractWindowsUserNameFromMessage(log.Message),
@@ -386,9 +421,10 @@ public class SqlServerLogMonitor : IDisposable
     /// <summary>
     /// 批量处理日志
     /// </summary>
-    private async Task<bool> ProcessLogsInBatchesAsync(List<SqlServerLogEntry> logs, string apiUrl, int batchSize = 10)
+    /// <returns>成功推送的日志条数</returns>
+    private async Task<int> ProcessLogsInBatchesAsync(List<SqlServerLogEntry> logs, string apiUrl, int batchSize = 10)
     {
-        bool allBatchesSuccessful = true;
+        int pushedCount = 0;
 
         for (int i = 0; i < logs.Count; i += batchSize)
         {
@@ -405,16 +441,16 @@ public class SqlServerLogMonitor : IDisposable
                 {
                     _dedupStore.TryAdd(log.UniqueKey);
                 }
+                pushedCount += batch.Count;
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"推送日志失败: {ex.Message}");
-                allBatchesSuccessful = false;
                 // 继续处理剩余批次，但标记为失败
             }
         }
 
-        return allBatchesSuccessful;
+        return pushedCount;
     }
 
     private string GetLogType(long eventId)
@@ -434,18 +470,9 @@ public class SqlServerLogMonitor : IDisposable
     {
         if (string.IsNullOrEmpty(message)) return "";
 
-        // SQL Server日志中用户名通常在单引号中
-        var patterns = new[]
+        foreach (var regex in SqlUserNamePatterns)
         {
-            @"Login name: '([^']+)'",
-            @"用户名: '([^']+)'",
-            @"User '([^']+)'",
-            @"用户 '([^']+)'"
-        };
-
-        foreach (var pattern in patterns)
-        {
-            var match = System.Text.RegularExpressions.Regex.Match(message, pattern);
+            var match = regex.Match(message);
             if (match.Success)
                 return match.Groups[1].Value;
         }
@@ -457,9 +484,7 @@ public class SqlServerLogMonitor : IDisposable
     {
         if (string.IsNullOrEmpty(message)) return "";
 
-        // 提取IP地址
-        var ipPattern = @"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b";
-        var match = System.Text.RegularExpressions.Regex.Match(message, ipPattern);
+        var match = IpAddressPattern.Match(message);
         return match.Success ? match.Value : "";
     }
 
@@ -467,17 +492,9 @@ public class SqlServerLogMonitor : IDisposable
     {
         if (string.IsNullOrEmpty(message)) return "";
 
-        // SQL Server日志中数据库名通常在特定位置
-        var patterns = new[]
+        foreach (var regex in SqlDatabaseNamePatterns)
         {
-            @"Database: '([^']+)'",
-            @"数据库: '([^']+)'",
-            @"database '([^']+)'"
-        };
-
-        foreach (var pattern in patterns)
-        {
-            var match = System.Text.RegularExpressions.Regex.Match(message, pattern);
+            var match = regex.Match(message);
             if (match.Success)
                 return match.Groups[1].Value;
         }
@@ -489,16 +506,9 @@ public class SqlServerLogMonitor : IDisposable
     {
         if (string.IsNullOrEmpty(message)) return "";
 
-        // Windows Security日志格式不同
-        var patterns = new[]
+        foreach (var regex in WindowsUserNamePatterns)
         {
-            @"Account Name:\s*([^\r\n\t]+)",
-            @"帐户名:\s*([^\r\n\t]+)"
-        };
-
-        foreach (var pattern in patterns)
-        {
-            var match = System.Text.RegularExpressions.Regex.Match(message, pattern);
+            var match = regex.Match(message);
             if (match.Success)
                 return match.Groups[1].Value.Trim();
         }
@@ -510,15 +520,9 @@ public class SqlServerLogMonitor : IDisposable
     {
         if (string.IsNullOrEmpty(message)) return "";
 
-        var patterns = new[]
+        foreach (var regex in WindowsClientIpPatterns)
         {
-            @"Source Network Address:\s*([^\r\n\t]+)",
-            @"源网络地址:\s*([^\r\n\t]+)"
-        };
-
-        foreach (var pattern in patterns)
-        {
-            var match = System.Text.RegularExpressions.Regex.Match(message, pattern);
+            var match = regex.Match(message);
             if (match.Success)
             {
                 var value = match.Groups[1].Value.Trim();
@@ -532,6 +536,15 @@ public class SqlServerLogMonitor : IDisposable
     }
 
     private string GenerateUniqueKey(EventLogEntry log)
+    {
+        var timeStamp = new DateTimeOffset(log.TimeGenerated).ToUnixTimeSeconds();
+        return $"{log.InstanceId}_{timeStamp}_{log.TimeGenerated.Ticks}_{log.Source}";
+    }
+
+    /// <summary>
+    /// 为 EventLogItem 生成唯一键（XPath 查询路径使用）
+    /// </summary>
+    private string GenerateUniqueKey(EventLogItem log)
     {
         var timeStamp = new DateTimeOffset(log.TimeGenerated).ToUnixTimeSeconds();
         return $"{log.InstanceId}_{timeStamp}_{log.TimeGenerated.Ticks}_{log.Source}";

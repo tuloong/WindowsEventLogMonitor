@@ -19,6 +19,7 @@ public class Config
     public AutoStartConfig AutoStart { get; set; } = new();
 
     private static Config? cachedConfig;
+    private static readonly object configLock = new object();
 
     /// <summary>
     /// 获取配置文件路径（程序所在目录）
@@ -34,15 +35,24 @@ public class Config
     {
         var configPath = GetConfigFilePath();
         var json = JsonConvert.SerializeObject(config, Formatting.Indented);
-        File.WriteAllText(configPath, json);
-        cachedConfig = config;
+        lock (configLock)
+        {
+            File.WriteAllText(configPath, json);
+            cachedConfig = config;
+        }
     }
 
     public static Config? GetCachedConfig()
     {
         if (cachedConfig == null)
         {
-            LoadConfig();
+            lock (configLock)
+            {
+                if (cachedConfig == null)
+                {
+                    LoadConfig();
+                }
+            }
         }
         return cachedConfig;
     }

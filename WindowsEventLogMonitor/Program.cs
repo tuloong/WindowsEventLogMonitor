@@ -177,8 +177,12 @@ namespace WindowsEventLogMonitor
             catch (Exception ex)
             {
                 Console.WriteLine($"控制台模式运行失败: {ex.Message}");
-                Console.WriteLine("按任意键退出...");
-                Console.ReadKey();
+                // 非交互式环境（如管道）下不调用 ReadKey，避免抛 InvalidOperationException
+                if (!Console.IsInputRedirected)
+                {
+                    Console.WriteLine("按任意键退出...");
+                    Console.ReadKey();
+                }
             }
         }
 

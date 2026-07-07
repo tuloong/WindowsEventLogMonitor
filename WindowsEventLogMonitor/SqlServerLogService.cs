@@ -187,18 +187,36 @@ public class SqlServerLogService : ServiceBase
     {
         Console.WriteLine("按 Ctrl+C 退出...");
 
+        // 先初始化 cancellationTokenSource，避免 RunAsConsole 模式下 OnStart 的后台初始化竞态导致空引用
+        cancellationTokenSource = new CancellationTokenSource();
+        var runLoop = true;
+
         OnStart(null);
 
         Console.CancelKeyPress += (sender, e) =>
         {
             e.Cancel = true;
-            OnStop();
+            runLoop = false;
+            try { OnStop(); } catch { /* 已停止则忽略 */ }
         };
 
         // 保持控制台应用程序运行
-        while (!cancellationTokenSource.Token.IsCancellationRequested)
+        // 使用本地 bool 标志控制循环，避免 cancellationTokenSource 被 OnStop Dispose 后访问 .Token 抛 ObjectDisposedException
+        while (runLoop)
         {
             Thread.Sleep(1000);
+            // 若 OnStart 内部因配置禁用调用了 Stop()，cancellationTokenSource 可能已被 Dispose
+            try
+            {
+                if (cancellationTokenSource == null || cancellationTokenSource.IsCancellationRequested)
+                {
+                    break;
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+                break;
+            }
         }
     }
 }

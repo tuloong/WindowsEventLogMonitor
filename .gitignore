@@ -366,6 +366,11 @@ FodyWeavers.xsd
 # Project-specific patterns
 # ============================================
 
+# AI/Agent tooling working directories
+.omc/
+.workbuddy/
+.codebuddy/
+
 # Worktrees directory (git worktree isolation)
 .worktrees/
 worktrees/
